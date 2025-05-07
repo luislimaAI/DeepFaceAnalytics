@@ -32,6 +32,7 @@ images/emotion_chart_*.png
 # Dados e arquivos pessoais (para evitar imagens de rostos sendo enviadas ao Git)
 images/known_faces/*.jpg
 images/known_faces/*.png
+images/known_faces/*.json
 !images/known_faces/.gitkeep
 
 # Arquivos de sistema
