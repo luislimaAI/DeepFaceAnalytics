@@ -1,0 +1,11 @@
+opencv-python>=4.5.0
+numpy>=1.19.0
+matplotlib>=3.3.0
+deepface>=0.0.75
+tensorflow>=2.4.0
+tf-keras>=2.10.0
+pandas>=1.1.0
+tqdm>=4.50.0
+pillow>=8.0.0
+mtcnn>=0.1.0
+retina-face>=0.0.1

@@ -1,0 +1,54 @@
+# Ambientes virtuais
+venv/
+env/
+ENV/
+env_py39/
+env_tf/
+
+# Arquivos de cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+nosetests.xml
+coverage.xml
+*.cover
+
+# Logs e arquivos de saída
+logs/*.log
+*.log
+
+# Arquivos gerados durante a execução
+images/temp_face_*.jpg
+output/*.json
+images/emotion_chart_*.png
+
+# Dados e arquivos pessoais (para evitar imagens de rostos sendo enviadas ao Git)
+images/known_faces/*.jpg
+images/known_faces/*.png
+!images/known_faces/.gitkeep
+
+# Arquivos de sistema
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+
+# Arquivos de distribuição / packaging
+dist/
+build/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Arquivos de configuração local
+.env
+.local
