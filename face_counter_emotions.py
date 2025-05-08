@@ -446,7 +446,7 @@ class FaceCounter:
             logger.debug("Classificador facial carregado com sucesso para webcam")
 
             # Iniciar captura de vídeo
-            cap = cv2.VideoCapture(1)
+            cap = cv2.VideoCapture(0)
 
             # Configurar resolução e FPS para melhor performance
             cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -457,6 +457,21 @@ class FaceCounter:
             if not cap.isOpened():
                 logger.error("Erro: Não foi possível acessar a webcam")
                 return
+
+            logger.info("Aguardando inicialização da câmera...")
+            for _ in range(10):
+                ret, _ = cap.read()
+                if ret:
+                    time.sleep(0.1)
+
+            ret, test_frame = cap.read()
+            if not ret or test_frame is None:
+                logger.error(
+                    "Erro: Não foi possível obter frames da câmera após inicialização"
+                )
+                return
+
+            logger.info("Câmera inicializada com sucesso")
 
             logger.info(
                 f"Webcam iniciada com sucesso. Resolução: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}"
@@ -475,17 +490,12 @@ class FaceCounter:
             # Estatísticas de desempenho
             total_frames = 0
             total_faces_detected = 0
-            total_analysis_attempts = 0
-            successful_analyses = 0
             start_time = time.time()
             last_fps_update = start_time
             fps = 0
 
             # Controle de frequência de análise para reduzir carga
-            skip_frames = 1
             frame_idx = 0
-            last_analysis_time = time.time()
-            min_analysis_interval = 0.3
 
             # Configurar parâmetros para detecção facial
             min_face_size = (60, 60)
@@ -506,7 +516,6 @@ class FaceCounter:
                     logger.error("Erro: Falha ao capturar frame da webcam")
                     break
 
-                frame_start = time.time()
                 total_frames += 1
                 frame_idx += 1
 
