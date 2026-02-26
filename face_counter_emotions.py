@@ -10,12 +10,12 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
+from typing import Optional, Tuple, Dict, List
 import logging
 import datetime
 import time
 import json
-from collections import defaultdict, Counter
-import traceback
+from collections import defaultdict, Counter, deque
 
 # Configurar logging
 log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
@@ -47,14 +47,28 @@ except ImportError as e:
 
 
 class FaceCounter:
-    """Classe para detectar, reconhecer e contar faces em imagens"""
+    """Classe para detectar, reconhecer e contar faces em imagens."""
+
+    # Constantes de configuração
+    RECOGNITION_THRESHOLD = 0.3
+    MIN_FACE_SIZE = (30, 30)
+    FACE_TRACKING_THRESHOLD = 3.0
+    EMOTION_WINDOW_SIZE = 30
+    WEBCAM_WIDTH = 640
+    WEBCAM_HEIGHT = 480
+    WEBCAM_FPS = 30
+    FACE_AREA_MIN = 3600    # mínimo para analisar emoção
+    FACE_AREA_MIN_REGISTER = 6400  # mínimo para registrar nova face
+    FACE_WIDTH_RATIO_MAX = 0.7
+    EMOTION_RECHECK_INTERVAL = 2.0  # segundos entre reanálises da mesma face
+    CLEANUP_INTERVAL = 5.0          # segundos entre limpezas de rastreadores
 
     def __init__(self):
         # Configurações iniciais
-        self.face_features_db = {}
-        self.tracked_faces = {}
+        self.face_features_db: Dict = {}
+        self.tracked_faces: Dict = {}
         self.next_temp_id = 1
-        self.known_faces = {}
+        self.known_faces: Dict = {}
         self.start_time = time.time()
 
         # Estatísticas
@@ -72,18 +86,17 @@ class FaceCounter:
         }
 
         # Estatísticas de idade
-        self.age_stats = {}
+        self.age_stats: Dict = {}
 
-        # Janela deslizante para emoções recentes
-        self.recent_emotions = []
-        self.recent_window_size = 30
+        # Janela deslizante para emoções recentes (deque é O(1) para append/popleft)
+        self.recent_emotions: deque = deque(maxlen=self.EMOTION_WINDOW_SIZE)
         self.last_emotion_update = time.time()
 
         # Configurações para reconhecimento
-        self.recognition_threshold = 0.3
-        self.min_face_size = (30, 30)
+        self.recognition_threshold = self.RECOGNITION_THRESHOLD
+        self.min_face_size = self.MIN_FACE_SIZE
         self.last_cleanup = time.time()
-        self.face_tracking_threshold = 3.0
+        self.face_tracking_threshold = self.FACE_TRACKING_THRESHOLD
 
         # Pasta para salvar faces conhecidas
         self.known_faces_dir = os.path.join(
@@ -181,10 +194,17 @@ class FaceCounter:
             logger.error(f"Erro ao registrar nova face: {e}")
             return None, None
 
+    @staticmethod
+    def _get_predominant_emotion(emotions: Dict) -> Optional[str]:
+        """Retorna a emoção com maior contagem no dicionário. Retorna None se vazio."""
+        if not emotions:
+            return None
+        return max(emotions.items(), key=lambda x: x[1])[0]
+
     def compare_faces(self, face_encoding1, face_encoding2):
         """
-        Comparar duas codificações faciais para determinar se são a mesma pessoa
-        Retorna True se as faces corresponderem à mesma pessoa, False caso contrário
+        Comparar duas codificações faciais para determinar se são a mesma pessoa.
+        Retorna True se as faces corresponderem à mesma pessoa, False caso contrário.
         """
         if face_encoding1 is None or face_encoding2 is None:
             return False
@@ -276,29 +296,17 @@ class FaceCounter:
             logger.error(f"Erro ao reconhecer face: {e}")
             return None, None
 
-    def update_recent_emotion(self, emotion):
-        """Atualiza a lista de emoções recentes e retorna a emoção predominante atual"""
+    def update_recent_emotion(self, emotion: str) -> Optional[str]:
+        """Atualiza a janela deslizante de emoções e retorna a emoção predominante atual."""
         if not emotion:
             return None
 
-        # Adicionar a emoção atual à lista de recentes
+        # deque com maxlen gerencia o tamanho automaticamente em O(1)
         self.recent_emotions.append(emotion)
-
-        # Limitar o tamanho da janela deslizante
-        if len(self.recent_emotions) > self.recent_window_size:
-            self.recent_emotions.pop(0)  # Remover a emoção mais antiga
-
-        # Atualizar o timestamp da última atualização
         self.last_emotion_update = time.time()
 
-        # Calcular a emoção predominante na janela recente
-        if self.recent_emotions:
-            # Usar Counter para encontrar a emoção mais frequente na janela
-            emotion_counts = Counter(self.recent_emotions)
-            predominant_emotion = emotion_counts.most_common(1)[0][0]
-            return predominant_emotion
-
-        return None
+        emotion_counts = Counter(self.recent_emotions)
+        return emotion_counts.most_common(1)[0][0]
 
     def process_frame(self, frame):
         """
@@ -412,9 +420,9 @@ class FaceCounter:
                     logging.warning(f"Erro ao analisar face {i}: {str(e)}")
                     continue
 
-            # Limpeza de rastreadores antigos (a cada 5 segundos)
+            # Limpeza de rastreadores antigos
             current_time = time.time()
-            if current_time - self.last_cleanup > 5:
+            if current_time - self.last_cleanup > self.CLEANUP_INTERVAL:
                 self.cleanup_trackers()
                 self.last_cleanup = current_time
 
@@ -449,9 +457,9 @@ class FaceCounter:
             cap = cv2.VideoCapture(0)
 
             # Configurar resolução e FPS para melhor performance
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            cap.set(cv2.CAP_PROP_FPS, 30)
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.WEBCAM_WIDTH)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.WEBCAM_HEIGHT)
+            cap.set(cv2.CAP_PROP_FPS, self.WEBCAM_FPS)
             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduzir buffer para minimizar o delay
 
             if not cap.isOpened():
@@ -491,8 +499,9 @@ class FaceCounter:
             total_frames = 0
             total_faces_detected = 0
             start_time = time.time()
-            last_fps_update = start_time
-            fps = 0
+            # Janela deslizante para FPS instantâneo (últimos N timestamps de frame)
+            fps_window: deque = deque(maxlen=30)
+            fps = 0.0
 
             # Controle de frequência de análise para reduzir carga
             frame_idx = 0
@@ -519,10 +528,11 @@ class FaceCounter:
                 total_frames += 1
                 frame_idx += 1
 
-                # Atualizar FPS a cada segundo
-                if time.time() - last_fps_update >= 1.0:
-                    fps = total_frames / (time.time() - start_time)
-                    last_fps_update = time.time()
+                # FPS instantâneo baseado nos últimos 30 frames
+                now = time.time()
+                fps_window.append(now)
+                if len(fps_window) >= 2:
+                    fps = (len(fps_window) - 1) / (fps_window[-1] - fps_window[0])
 
                 # Converter para escala de cinza
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -575,10 +585,8 @@ class FaceCounter:
                         (0, 255, 0),
                         2,
                     )
-                elif (
-                    self.emotion_stats
-                ):  # Fallback para o método antigo se não houver emoções recentes
-                    top_emotion = max(self.emotion_stats.items(), key=lambda x: x[1])[0]
+                elif self.emotion_stats:
+                    top_emotion = self._get_predominant_emotion(self.emotion_stats)
                     cv2.putText(
                         frame,
                         f"Sentimento predominante: {top_emotion}",
@@ -596,7 +604,7 @@ class FaceCounter:
                     face_width_ratio = w / frame.shape[1]
 
                     # Filtrar faces muito pequenas ou muito grandes
-                    if face_area < 3600 or face_width_ratio > 0.7:
+                    if face_area < self.FACE_AREA_MIN or face_width_ratio > self.FACE_WIDTH_RATIO_MAX:
                         continue
 
                     # Extrair a imagem da face
@@ -610,7 +618,7 @@ class FaceCounter:
                         face_position_key not in current_session_faces
                         or time.time()
                         - current_session_faces[face_position_key].get("last_check", 0)
-                        > 2.0
+                        > self.EMOTION_RECHECK_INTERVAL
                     ):
 
                         # Tentar fazer análise emocional
@@ -619,22 +627,12 @@ class FaceCounter:
 
                         if DEEPFACE_AVAILABLE:
                             try:
-                                # Salvar temporariamente para análise
-                                temp_path = os.path.join(
-                                    self.images_dir, f"temp_face_{face_index+1}.jpg"
-                                )
-                                cv2.imwrite(temp_path, face_img)
-
-                                # Analisar com DeepFace
+                                # Analisar diretamente do array numpy (sem I/O em disco)
                                 result = DeepFace.analyze(
-                                    temp_path,
+                                    face_img,
                                     actions=["emotion", "age"],
                                     enforce_detection=False,
                                 )
-
-                                # Remover arquivo temporário
-                                if os.path.exists(temp_path):
-                                    os.remove(temp_path)
 
                                 # Extrair informações
                                 if isinstance(result, list):
@@ -642,21 +640,18 @@ class FaceCounter:
 
                                 if result:
                                     if "emotion" in result:
-                                        emotion = max(
-                                            result["emotion"].items(),
-                                            key=lambda x: x[1],
-                                        )[0]
-                                        session_emotions[emotion] += 1
-
-                                        # Adicionar à lista de emoções recentes para atualizar o sentimento predominante
-                                        self.update_recent_emotion(emotion)
+                                        emotion = self._get_predominant_emotion(
+                                            result["emotion"]
+                                        )
+                                        if emotion:
+                                            session_emotions[emotion] += 1
+                                            self.update_recent_emotion(emotion)
 
                                     if "age" in result:
                                         age = result["age"]
 
                             except Exception as e:
                                 logger.debug(f"Falha na análise emocional: {e}")
-                                pass
 
                         # Tentar reconhecer a face
                         face_id, face_name = None, None
@@ -666,7 +661,7 @@ class FaceCounter:
                             )
 
                         # Se não reconheceu, registrar como nova face
-                        if face_id is None and DEEPFACE_AVAILABLE and face_area > 6400:
+                        if face_id is None and DEEPFACE_AVAILABLE and face_area > self.FACE_AREA_MIN_REGISTER:
                             face_id, face_name = self.register_new_face(
                                 face_img, emotion, age
                             )
@@ -829,76 +824,42 @@ class FaceCounter:
         # Mostrar sentimento predominante e idade média por pessoa
         print("\n=== Sentimento Predominante e Idade Média por Pessoa ===")
 
-        # Calcular idades médias e analisar emoções por pessoa
-        age_averages = {}
-        emotion_percentages = {}
+        # Calcular idades médias e percentuais de emoções por pessoa (loop único)
+        age_averages: Dict = {}
+        emotion_percentages: Dict = {}
 
         for face_id, face_data in self.known_faces.items():
             name = face_data["name"]
             emotions = face_data.get("emotions", {})
             ages = face_data.get("ages", [])
 
-            # Calcular distribuição percentual de emoções para esta pessoa
+            # Calcular distribuição percentual de emoções
             if emotions:
                 total_emotion_count = sum(emotions.values())
-                emotion_percentages[name] = {
-                    emotion: (count / total_emotion_count) * 100
-                    for emotion, count in emotions.items()
+                person_pct = {
+                    em: (cnt / total_emotion_count) * 100
+                    for em, cnt in emotions.items()
                 }
+                emotion_percentages[name] = person_pct
 
-                # Determinar o sentimento predominante real
-                predominant = max(emotions.items(), key=lambda x: x[1])[0]
-
-                # Log do sentimento predominante real
+                predominant = self._get_predominant_emotion(emotions)
                 logger.info(
-                    f"{name}: Sentimento predominante é '{predominant}' ({emotion_percentages[name][predominant]:.1f}%)"
+                    f"{name}: Sentimento predominante é '{predominant}' ({person_pct[predominant]:.1f}%)"
                 )
 
-            # Calcular média de idade
+                print(f"{name}: Sentimento predominante: {predominant} ({person_pct[predominant]:.1f}%)")
+                print("  Distribuição de sentimentos:")
+                for em, pct in sorted(person_pct.items(), key=lambda x: x[1], reverse=True):
+                    print(f"    - {em}: {pct:.1f}%")
+            else:
+                print(f"{name}: Sem emoções detectadas")
+
+            # Calcular e exibir média de idade
             if ages:
                 avg_age = sum(ages) / len(ages)
                 age_averages[name] = avg_age
-
-                # Registrar no log
                 logger.info(f"Idade média de {name}: {avg_age:.1f} anos")
-
-        # Exibir informações de cada pessoa
-        for face_id, face_data in self.known_faces.items():
-            name = face_data["name"]
-            emotions = face_data.get("emotions", {})
-            ages = face_data.get("ages", [])
-
-            if emotions:
-                # Obter sentimento predominante real
-                predominant = max(emotions.items(), key=lambda x: x[1])[0]
-
-                # Obter percentagens de cada emoção para esta pessoa
-                person_percentages = emotion_percentages.get(name, {})
-
-                # Mostrar informações detalhadas
-                print(
-                    f"{name}: Sentimento predominante: {predominant} ({person_percentages.get(predominant, 0):.1f}%)"
-                )
-                print(f"  Distribuição de sentimentos:")
-
-                # Mostrar cada emoção detectada e seu percentual
-                for emotion, percentage in sorted(
-                    person_percentages.items(), key=lambda x: x[1], reverse=True
-                ):
-                    print(f"    - {emotion}: {percentage:.1f}%")
-
-                # Mostrar idade média se disponível
-                if ages:
-                    avg_age = sum(ages) / len(ages)
-                    print(f"  Idade média: {avg_age:.1f} anos")
-            else:
-                if ages:
-                    avg_age = sum(ages) / len(ages)
-                    print(
-                        f"{name}: Sem emoções detectadas (Idade média: {avg_age:.1f} anos)"
-                    )
-                else:
-                    print(f"{name}: Sem emoções ou idade detectadas")
+                print(f"  Idade média: {avg_age:.1f} anos")
 
         # Criar e mostrar gráfico de emoções se possível
         try:
@@ -1045,10 +1006,10 @@ class FaceCounter:
                 if emotions:
                     total_emotion_count = sum(emotions.values())
                     emotion_percentages = {
-                        emotion: (count / total_emotion_count) * 100
-                        for emotion, count in emotions.items()
+                        em: (cnt / total_emotion_count) * 100
+                        for em, cnt in emotions.items()
                     }
-                    predominant_emotion = max(emotions.items(), key=lambda x: x[1])[0]
+                    predominant_emotion = self._get_predominant_emotion(emotions)
 
                 # Calcular idade média
                 avg_age = None
@@ -1106,8 +1067,7 @@ class FaceCounter:
             ages = face_data.get("ages", [])
 
             if emotions:
-                # Pegar a emoção predominante para esta pessoa
-                predominant = max(emotions.items(), key=lambda x: x[1])[0]
+                predominant = self._get_predominant_emotion(emotions)
                 emotion_by_person[name] = predominant
 
             if ages:
@@ -1147,27 +1107,12 @@ class FaceCounter:
             ages = face_data.get("ages", [])
             detection_count = face_data["detection_count"]
 
+            avg_age_str = f"Idade média: {sum(ages)/len(ages):.1f} anos" if ages else "Idade não detectada"
             if emotions:
-                predominant = max(emotions.items(), key=lambda x: x[1])[0]
-                if ages:
-                    avg_age = sum(ages) / len(ages)
-                    print(
-                        f"{name} - Sentimento predominante: {predominant} (Idade média: {avg_age:.1f} anos, Detectado {detection_count} vezes)"
-                    )
-                else:
-                    print(
-                        f"{name} - Sentimento predominante: {predominant} (Idade não detectada, Detectado {detection_count} vezes)"
-                    )
+                predominant = self._get_predominant_emotion(emotions)
+                print(f"{name} - Sentimento predominante: {predominant} ({avg_age_str}, Detectado {detection_count} vezes)")
             else:
-                if ages:
-                    avg_age = sum(ages) / len(ages)
-                    print(
-                        f"{name} - Sem emoções detectadas (Idade média: {avg_age:.1f} anos, Detectado {detection_count} vezes)"
-                    )
-                else:
-                    print(
-                        f"{name} - Sem emoções ou idade detectadas (Detectado {detection_count} vezes)"
-                    )
+                print(f"{name} - Sem emoções detectadas ({avg_age_str}, Detectado {detection_count} vezes)")
 
 
 def main():
@@ -1192,8 +1137,13 @@ def main():
         print("4. Salvar resultados em JSON")
         print("5. Sair")
 
-        choice = input("\nEscolha uma opção (1-5): ")
+        choice = input("\nEscolha uma opção (1-5): ").strip()
         logger.info(f"Opção selecionada: {choice}")
+
+        if choice not in {"1", "2", "3", "4", "5"}:
+            logger.warning(f"Opção inválida escolhida: {choice!r}")
+            print("\nOpção inválida. Por favor, escolha uma opção de 1 a 5.")
+            continue
 
         if choice == "1":
             counter.detect_faces_webcam()
@@ -1213,10 +1163,6 @@ def main():
             logger.info("Usuário solicitou saída do programa")
             print("\nSaindo do programa. Até mais!")
             break
-
-        else:
-            logger.warning(f"Opção inválida escolhida: {choice}")
-            print("\nOpção inválida. Por favor, escolha uma opção de 1 a 5.")
 
     logger.info("=== Aplicação Face Counter & Emotion Analyzer encerrada ===")
 
