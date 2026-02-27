@@ -2,6 +2,7 @@
 
 from deepface_analytics.analyzer import FaceAnalyzer
 from deepface_analytics.detector import FaceDetector
+from deepface_analytics.storage import FaceStorage
 from deepface_analytics.tracker import FaceTracker
 
-__all__ = ["FaceAnalyzer", "FaceDetector", "FaceTracker"]
+__all__ = ["FaceAnalyzer", "FaceDetector", "FaceStorage", "FaceTracker"]
