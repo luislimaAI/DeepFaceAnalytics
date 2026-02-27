@@ -4,9 +4,11 @@ import datetime
 import json
 import logging
 import os
+import queue
+import threading
 import time
 from collections import Counter, deque
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 import cv2
 import matplotlib.pyplot as plt
@@ -64,6 +66,17 @@ class FaceCounterApp:
         self.total_faces_detected: int = 0
         self.emotion_stats: Dict[str, int] = {}
 
+        # Async pipeline primitives (thread infrastructure for US-008)
+        self.analysis_queue: queue.Queue[Tuple[str, npt.NDArray[Any]]] = queue.Queue(
+            maxsize=2
+        )
+        self.results_dict: Dict[str, Any] = {}
+        self.results_lock: threading.Lock = threading.Lock()
+        self.stop_event: threading.Event = threading.Event()
+        self.analysis_thread: threading.Thread = threading.Thread(
+            target=self._deepface_worker, daemon=True
+        )
+
     def warmup_models(self) -> None:
         """Pre-warm DeepFace models before the main capture loop."""
         if not DEEPFACE_AVAILABLE or self.no_deepface:
@@ -82,6 +95,29 @@ class FaceCounterApp:
             logger.exception("Warmup failed (non-fatal)")
         elapsed = time.time() - t0
         logger.info("Modelos carregados em %.2f segundos", elapsed)
+
+    def _deepface_worker(self) -> None:
+        """Worker thread: dequeues face crops, runs analysis, writes results."""
+        while not self.stop_event.is_set():
+            try:
+                face_id, face_img = self.analysis_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            try:
+                result = self.analyzer.analyze_face(face_img, face_id)
+                if result is not None:
+                    with self.results_lock:
+                        self.results_dict[face_id] = result
+            except Exception:
+                logger.exception("Error in DeepFace worker for face_id=%s", face_id)
+            finally:
+                self.analysis_queue.task_done()
+
+    def stop_analysis_thread(self) -> None:
+        """Signal the worker thread to stop and wait for it to terminate."""
+        self.stop_event.set()
+        if self.analysis_thread.is_alive():
+            self.analysis_thread.join(timeout=3.0)
 
     def detect_faces_webcam(self) -> None:
         """Main webcam capture and display loop using the new modules."""
