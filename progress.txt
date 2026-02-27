@@ -1,3 +1,23 @@
+## 2026-02-27 - US-006
+- Created deepface_analytics/app.py with FaceCounterApp class
+  - warmup_models(): calls DeepFace.analyze() with blank 224x224 frame; prints warmup message; logs elapsed time
+  - detect_faces_webcam(): full capture loop using FaceDetector.detect_faces(), FaceAnalyzer.analyze_face(), FaceTracker.is_same_as_known_face()/add_face_encoding(), FaceStorage.register_face()/save_known_faces()
+  - show_emotion_statistics(): identical user-facing output to legacy (emotion stats + matplotlib chart)
+  - list_people_count(): identical user-facing output to legacy
+  - save_results_to_json(): uses FaceStorage.generate_session_json() + writes JSON to output/
+  - main(): logging setup, FaceCounterApp instantiation, CLI menu (options 1-5) preserved exactly
+- Updated deepface_analytics/__init__.py to export FaceCounterApp and main
+- Updated face_counter_emotions.py to thin entry-point: `from deepface_analytics.app import main; main()`
+- ruff check . passes, mypy deepface_analytics/ passes (6 source files)
+- Files changed: deepface_analytics/app.py (new), deepface_analytics/__init__.py (updated), face_counter_emotions.py (replaced with thin entry-point)
+- **Learnings for future iterations:**
+  - `set[str]` requires type param in mypy strict (bare `set` causes type-arg error)
+  - Import EMOTION_RECHECK_INTERVAL from analyzer module instead of accessing private `_ttl` attribute
+  - Face position key `f"{x}_{y}_{w}_{h}"` is used as DeepFace cache key (matches legacy behavior)
+  - `face_counter_emotions.py` mypy override remains in pyproject.toml (harmless after thin entry-point)
+  - FaceStorage.setdefault() pattern: `fd.setdefault("emotions", {})` returns `Any` under Dict[str,Any] - annotate explicitly
+---
+
 ## 2026-02-27 - US-005
 - Created deepface_analytics/storage.py with FaceStorage class
   - load_known_faces(path): returns dict from JSON or {} on missing file / parse error
