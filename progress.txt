@@ -173,3 +173,16 @@ Started: Fri Feb 27 20:01:51 -03 2026
   - `traceback.print_exc()` at line 431 is a real NameError bug (no import) - tagged `# noqa: F821` for now
   - mypy strict mode requires full type annotations which legacy code lacks
 ---
+
+## 2026-02-27 - US-010
+- Created tests/__init__.py (empty)
+- Created tests/conftest.py with 6 fixtures: synthetic_frame, synthetic_face_crop, mock_deepface_result, tmp_known_faces_dir, sample_known_faces, mock_deepface
+- All fixtures use default scope='function' for test isolation
+- pytest --collect-only --fixtures confirms all fixtures discoverable
+- ruff check . passes, mypy deepface_analytics/ passes
+- Files changed: tests/__init__.py (new), tests/conftest.py (new)
+- **Learnings for future iterations:**
+  - mock_deepface patches `deepface.DeepFace.analyze` (full module path), not `deepface_analytics.analyzer.DeepFace.analyze`
+  - embedding_list fixture added as utility (2622 floats of 0.1) for tracker tests
+  - conftest.py uses `from __future__ import annotations` for cleaner type hints
+---
