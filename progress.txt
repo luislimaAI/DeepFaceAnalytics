@@ -1,3 +1,20 @@
+## 2026-02-27 - US-005
+- Created deepface_analytics/storage.py with FaceStorage class
+  - load_known_faces(path): returns dict from JSON or {} on missing file / parse error
+  - save_known_faces(data, path): writes JSON with indent=4; creates parent dir with os.makedirs(exist_ok=True)
+  - register_face(face_img, emotion, age, known_faces_dir): generates face_id = face_{timestamp}_{counter}, saves JPEG, adds entry to self.known_faces, returns (face_id, name)
+  - prune_known_faces(data, max_entries=500): sorts by first_seen ascending, keeps newest max_entries, returns new dict
+  - generate_session_json(known_faces, stats, start_time): returns dict with timestamp/date/time/session_info/people matching legacy format
+  - All directory creation via os.makedirs(exist_ok=True)
+- Updated deepface_analytics/__init__.py to export FaceStorage
+- Files changed: deepface_analytics/storage.py (new), deepface_analytics/__init__.py (updated)
+- **Learnings for future iterations:**
+  - import time inside generate_session_json to avoid top-level circular concern; or just import at top — both work with mypy
+  - prune_known_faces returns a NEW dict (not in-place) to match functional style; caller replaces their reference
+  - generate_session_json takes `stats: Dict[str, Any]` with at least `total_detected_faces` key; start_time is a float Unix timestamp
+  - save_known_faces uses os.path.dirname(os.path.abspath(path)) to ensure parent dir exists before writing
+---
+
 ## 2026-02-27 - US-004
 - Created deepface_analytics/tracker.py with FaceTracker class
   - RECOGNITION_THRESHOLD=0.3, FACE_TRACKING_THRESHOLD=3.0, EMOTION_WINDOW_SIZE=30
