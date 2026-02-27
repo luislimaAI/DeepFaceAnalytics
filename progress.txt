@@ -1,3 +1,24 @@
+## 2026-02-27 - US-008
+- Added `import queue` and `import threading` to deepface_analytics/app.py
+- Added `Tuple` to typing imports
+- Added to `FaceCounterApp.__init__()`:
+  - `self.analysis_queue: queue.Queue[Tuple[str, npt.NDArray[Any]]] = queue.Queue(maxsize=2)`
+  - `self.results_dict: Dict[str, Any] = {}`
+  - `self.results_lock: threading.Lock = threading.Lock()`
+  - `self.stop_event: threading.Event = threading.Event()`
+  - `self.analysis_thread: threading.Thread = threading.Thread(target=self._deepface_worker, daemon=True)`
+- Added `_deepface_worker()` method: loops while not stop_event.is_set(); catches queue.Empty on timeout and continues; on result calls FaceAnalyzer.analyze_face() and writes to results_dict under results_lock; calls task_done() in finally
+- Added `stop_analysis_thread()` method: sets stop_event, joins thread if alive with timeout=3.0
+- Thread is created in __init__ but NOT started (US-009 starts it in detect_faces_webcam)
+- ruff check . passes, mypy deepface_analytics/ passes
+- Files changed: deepface_analytics/app.py
+- **Learnings for future iterations:**
+  - Thread is created in __init__ but started in detect_faces_webcam(); stop_analysis_thread() guards with is_alive() before join()
+  - `queue.Queue[Tuple[str, npt.NDArray[Any]]]` is the correct mypy-strict type for the analysis queue
+  - `queue.Empty` is the exception to catch on get(timeout=...) — import via `import queue` then `except queue.Empty`
+  - task_done() called in `finally` block so it's always called even if analyze_face() raises
+---
+
 ## 2026-02-27 - US-007
 - Replaced `traceback.print_exc()` bug: legacy code already rewritten in US-006 using `logger.exception()` throughout — no traceback import needed
 - Added argparse to `face_counter_emotions.py` with `--no-deepface` flag; passes parsed value to `main(no_deepface=...)`
