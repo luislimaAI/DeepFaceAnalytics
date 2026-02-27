@@ -40,7 +40,7 @@ CLEANUP_INTERVAL: float = 5.0
 class FaceCounterApp:
     """Orchestrates FaceDetector, FaceAnalyzer, FaceTracker, and FaceStorage."""
 
-    def __init__(self) -> None:
+    def __init__(self, no_deepface: bool = False) -> None:
         base_dir = os.path.dirname(os.path.abspath(__file__))
         project_dir = os.path.dirname(base_dir)
         self.known_faces_dir = os.path.join(project_dir, "images", "known_faces")
@@ -49,6 +49,8 @@ class FaceCounterApp:
         os.makedirs(self.known_faces_dir, exist_ok=True)
         os.makedirs(self.images_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
+
+        self.no_deepface = no_deepface
 
         self.detector = FaceDetector()
         self.analyzer = FaceAnalyzer()
@@ -64,7 +66,7 @@ class FaceCounterApp:
 
     def warmup_models(self) -> None:
         """Pre-warm DeepFace models before the main capture loop."""
-        if not DEEPFACE_AVAILABLE:
+        if not DEEPFACE_AVAILABLE or self.no_deepface:
             return
         print("Carregando modelos de análise... (pode levar alguns segundos)")
         t0 = time.time()
@@ -123,7 +125,7 @@ class FaceCounterApp:
         start_time = time.time()
         fps_window: Deque[float] = deque(maxlen=30)
         fps = 0.0
-        can_analyze = DEEPFACE_AVAILABLE
+        can_analyze = DEEPFACE_AVAILABLE and not self.no_deepface
         logger.info("Análise emocional: %s", "ATIVA" if can_analyze else "INATIVA")
 
         current_session_faces: Dict[str, Any] = {}
@@ -252,7 +254,9 @@ class FaceCounterApp:
                 disp_face_name: str = str(
                     face_info.get("face_name") or f"Face #{face_index + 1}"
                 )
-                disp_emotion: Optional[str] = face_info.get("emotion")
+                disp_emotion: Optional[str] = (
+                    "N/A" if self.no_deepface else face_info.get("emotion")
+                )
                 disp_age: Optional[int] = face_info.get("age")
 
                 rect_color = (0, 255, 0) if disp_face_id else (255, 0, 0)
@@ -569,7 +573,7 @@ class FaceCounterApp:
             return None
 
 
-def main() -> None:
+def main(no_deepface: bool = False) -> None:
     """Main entry point for the Face Counter & Emotion Analyzer application."""
     base_dir = os.path.dirname(os.path.abspath(__file__))
     log_dir = os.path.join(os.path.dirname(base_dir), "logs")
@@ -585,7 +589,7 @@ def main() -> None:
     )
     logger.info("=== Iniciando aplicação Face Counter & Emotion Analyzer ===")
 
-    app = FaceCounterApp()
+    app = FaceCounterApp(no_deepface=no_deepface)
 
     print("=" * 50)
     print("Contador de Pessoas & Analisador de Sentimentos")

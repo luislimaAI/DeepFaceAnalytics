@@ -1,3 +1,19 @@
+## 2026-02-27 - US-007
+- Replaced `traceback.print_exc()` bug: legacy code already rewritten in US-006 using `logger.exception()` throughout — no traceback import needed
+- Added argparse to `face_counter_emotions.py` with `--no-deepface` flag; passes parsed value to `main(no_deepface=...)`
+- Modified `FaceCounterApp.__init__()` to accept `no_deepface: bool = False`; stored as `self.no_deepface`
+- Modified `warmup_models()`: skips DeepFace warmup when `self.no_deepface=True` (avoids loading TensorFlow)
+- Modified `detect_faces_webcam()`: `can_analyze = DEEPFACE_AVAILABLE and not self.no_deepface`; emotion displayed as 'N/A' (not None) when `--no-deepface`
+- Modified `main()` to accept `no_deepface: bool = False` and pass to `FaceCounterApp`
+- ruff check . passes, mypy deepface_analytics/ passes (6 source files)
+- Files changed: face_counter_emotions.py (argparse entry-point), deepface_analytics/app.py (no_deepface support)
+- **Learnings for future iterations:**
+  - `argparse.ArgumentParser` in face_counter_emotions.py is fine — mypy override `ignore_errors = true` covers that file
+  - `--no-deepface` flag uses `action="store_true"` → `args.no_deepface` is `bool`; argparse converts `--no-deepface` to `no_deepface` attribute automatically
+  - `can_analyze = DEEPFACE_AVAILABLE and not self.no_deepface` is the single gate for all analysis paths
+  - Display 'N/A' string for emotion (not None) when no-deepface, so the `if disp_emotion:` check shows it on screen
+---
+
 ## 2026-02-27 - US-006
 - Created deepface_analytics/app.py with FaceCounterApp class
   - warmup_models(): calls DeepFace.analyze() with blank 224x224 frame; prints warmup message; logs elapsed time
@@ -57,13 +73,14 @@
 - ruff uses `[tool.ruff.lint]` section (not top-level `select`) in pyproject.toml
 - deepface IS installed in this environment; `from deepface import DeepFace` works without `# type: ignore`
 - For optional imports in try/except: if the package IS installed, mypy will flag `# type: ignore[name-defined]` as unused — omit it when package is available
-- Legacy face_counter_emotions.py has `traceback.print_exc()` without traceback imported (F821 bug) - add `# noqa: F821` until fixed in US-007
+- Legacy `traceback.print_exc()` bug: replaced with `logger.exception()` — never import traceback; logger.exception() logs the full traceback automatically
 - mypy per-file overrides: use `[[tool.mypy.overrides]]` with `module = "filename"` and `ignore_errors = true` for legacy files
 - When ruff checks succeed, run `mypy <file>` separately to confirm typecheck
-- face_counter_emotions.py is the monolithic legacy file - will be broken into deepface_analytics/ package in US-002 through US-006
+- face_counter_emotions.py is now a thin entry-point with argparse; real logic in deepface_analytics/ package
 - mypy strict mode: use `npt.NDArray[Any]` (from `numpy.typing`) for numpy arrays instead of bare `np.ndarray` to satisfy `type-arg` checks
 - cv2.data.haarcascades does NOT need `# type: ignore` with mypy 1.19 + cv2 stubs
 - Don't import `numpy as np` if only `numpy.typing as npt` is needed - avoids F401
+- CLI flags: use argparse in face_counter_emotions.py; pass parsed values to main() and then to FaceCounterApp constructor as constructor params
 
 # Ralph Progress Log
 Started: Fri Feb 27 20:01:51 -03 2026
