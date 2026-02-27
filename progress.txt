@@ -1,3 +1,27 @@
+## 2026-02-27 - US-009
+- Rewrote `detect_faces_webcam()` to use async producer-consumer pipeline:
+  - `can_analyze` flag computed before `warmup_models()` and thread start
+  - `stop_event.clear()` + new `threading.Thread` created each call (allows multiple webcam sessions from menu)
+  - Thread started before capture loop (`self.analysis_thread.start()`)
+  - Main loop: fast `self.detector.detect_faces(frame)` every frame (no blocking)
+  - Per-face: `queue.put_nowait((face_position_key, face_img))` with silent `queue.Full` drop
+  - Per-face: reads `self.results_dict.get(face_position_key)` under `self.results_lock`
+  - Registration/tracking logic moved to "first result" handler (only runs once per position key)
+  - `current_session_faces` stores `"last_seen": now` (replaces old `"last_check"`) for `cleanup_trackers` compatibility
+  - 'analisando...' shown when `can_analyze and face_position_key not in current_session_faces`
+  - On 'q': `stop_analysis_thread()` called before break (before `cap.release()`)
+  - After loop: `stop_analysis_thread()` called again (idempotent — handles error exit path)
+  - Removed unused `EMOTION_RECHECK_INTERVAL` import (no longer needed in main loop)
+- ruff check . passes, mypy deepface_analytics/ passes
+- Files changed: deepface_analytics/app.py
+- **Learnings for future iterations:**
+  - Thread must be recreated each call to `detect_faces_webcam()` — Python threads can only be started once; use `stop_event.clear()` + `threading.Thread(...)` before `.start()`
+  - `queue.Full` exception from `put_nowait()` must be caught silently (not logged) to avoid spamming logs during normal operation
+  - `cleanup_trackers` requires `state["last_seen"]` float key — use `"last_seen"` not `"last_check"` in session_faces dict
+  - `stop_analysis_thread()` is idempotent: safe to call twice (once on 'q', once after loop exit)
+  - 'analisando...' condition: `can_analyze and face_position_key not in current_session_faces` — checked AFTER the result-processing block (which adds to current_session_faces when result arrives)
+---
+
 ## 2026-02-27 - US-008
 - Added `import queue` and `import threading` to deepface_analytics/app.py
 - Added `Tuple` to typing imports
