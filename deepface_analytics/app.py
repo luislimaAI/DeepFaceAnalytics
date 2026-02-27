@@ -15,7 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import numpy.typing as npt
 
-from deepface_analytics.analyzer import EMOTION_RECHECK_INTERVAL, FaceAnalyzer
+from deepface_analytics.analyzer import FaceAnalyzer
 from deepface_analytics.detector import FaceDetector
 from deepface_analytics.storage import FaceStorage
 from deepface_analytics.tracker import FaceTracker
@@ -120,10 +120,21 @@ class FaceCounterApp:
             self.analysis_thread.join(timeout=3.0)
 
     def detect_faces_webcam(self) -> None:
-        """Main webcam capture and display loop using the new modules."""
+        """Main webcam capture and display loop using async analysis pipeline."""
         logger.info("Iniciando detecção facial pela webcam com análise emocional")
 
+        can_analyze = DEEPFACE_AVAILABLE and not self.no_deepface
+        logger.info("Análise emocional: %s", "ATIVA" if can_analyze else "INATIVA")
+
         self.warmup_models()
+
+        # Start worker thread before the capture loop (US-009)
+        if can_analyze:
+            self.stop_event.clear()
+            self.analysis_thread = threading.Thread(
+                target=self._deepface_worker, daemon=True
+            )
+            self.analysis_thread.start()
 
         cap = cv2.VideoCapture(0)
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, WEBCAM_WIDTH)
@@ -133,6 +144,8 @@ class FaceCounterApp:
 
         if not cap.isOpened():
             logger.error("Erro: Não foi possível acessar a webcam")
+            if can_analyze:
+                self.stop_analysis_thread()
             return
 
         logger.info("Aguardando inicialização da câmera...")
@@ -144,6 +157,9 @@ class FaceCounterApp:
         ret, test_frame = cap.read()
         if not ret or test_frame is None:
             logger.error("Erro: Não foi possível obter frames da câmera após inicialização")
+            if can_analyze:
+                self.stop_analysis_thread()
+            cap.release()
             return
 
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -161,8 +177,6 @@ class FaceCounterApp:
         start_time = time.time()
         fps_window: Deque[float] = deque(maxlen=30)
         fps = 0.0
-        can_analyze = DEEPFACE_AVAILABLE and not self.no_deepface
-        logger.info("Análise emocional: %s", "ATIVA" if can_analyze else "INATIVA")
 
         current_session_faces: Dict[str, Any] = {}
         last_cleanup = time.time()
@@ -180,6 +194,7 @@ class FaceCounterApp:
             if len(fps_window) >= 2:
                 fps = (len(fps_window) - 1) / (fps_window[-1] - fps_window[0])
 
+            # Fast detection every frame — bounding boxes only, no blocking DeepFace
             faces = self.detector.detect_faces(frame)
             total_faces_session += len(faces)
             self.total_faces_detected += len(faces)
@@ -223,76 +238,86 @@ class FaceCounterApp:
                 face_img: npt.NDArray[Any] = frame[y : y + h, x : x + w]
                 face_position_key = f"{x}_{y}_{w}_{h}"
 
-                last_check = float(
-                    current_session_faces.get(face_position_key, {}).get("last_check", 0)
-                )
-                if can_analyze and (
-                    face_position_key not in current_session_faces
-                    or now - last_check > EMOTION_RECHECK_INTERVAL
-                ):
-                    emotion: Optional[str] = None
-                    age: Optional[int] = None
+                # Enqueue face crop for async analysis; drop silently if queue is full
+                if can_analyze:
+                    try:
+                        self.analysis_queue.put_nowait((face_position_key, face_img))
+                    except queue.Full:
+                        pass
+
+                # Read latest result from results_dict under lock
+                result: Optional[Dict[str, Any]] = None
+                if can_analyze:
+                    with self.results_lock:
+                        result = self.results_dict.get(face_position_key)
+
+                # Process result when first available for this face position
+                if result is not None and face_position_key not in current_session_faces:
+                    raw_emotion = result.get("dominant_emotion", "")
+                    emotion: Optional[str] = str(raw_emotion) if raw_emotion else None
+                    raw_age = result.get("age", 0)
+                    age: Optional[int] = int(raw_age) if raw_age else None
+                    embedding: List[Any] = result.get("embedding", [])
+
                     face_id: Optional[str] = None
                     face_name: Optional[str] = None
+                    if embedding:
+                        enc: npt.NDArray[Any] = np.array(embedding)
+                        face_id = self.tracker.is_same_as_known_face(enc)
 
-                    result = self.analyzer.analyze_face(face_img, face_position_key)
-                    if result is not None:
-                        raw_emotion = result.get("dominant_emotion", "")
-                        emotion = str(raw_emotion) if raw_emotion else None
-                        raw_age = result.get("age", 0)
-                        age = int(raw_age) if raw_age else None
-
-                        embedding: List[Any] = result.get("embedding", [])
-                        if embedding:
-                            enc: npt.NDArray[Any] = np.array(embedding)
-                            face_id = self.tracker.is_same_as_known_face(enc)
-
-                            if face_id is None and face_area > FACE_AREA_MIN_REGISTER:
-                                face_id, face_name = self.storage.register_face(
-                                    face_img, emotion, age, self.known_faces_dir
-                                )
-                                self.tracker.add_face_encoding(face_id, enc)
-                                self.storage.save_known_faces(
-                                    self.storage.known_faces, faces_json
-                                )
-                            elif face_id and face_id in self.storage.known_faces:
-                                fd: Dict[str, Any] = self.storage.known_faces[face_id]
-                                now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                fd["last_seen"] = now_str
-                                fd["detection_count"] = int(fd.get("detection_count", 0)) + 1
-                                if emotion:
-                                    emo_dict: Dict[str, int] = fd.setdefault("emotions", {})
-                                    emo_dict[emotion] = emo_dict.get(emotion, 0) + 1
-                                if age is not None:
-                                    ages_list: List[Any] = fd.setdefault("ages", [])
-                                    ages_list.append(age)
-
-                        if emotion:
-                            self.emotion_stats[emotion] = self.emotion_stats.get(emotion, 0) + 1
-                            self.tracker.update_recent_emotion(emotion)
-
-                        if face_id and face_name is None and face_id in self.storage.known_faces:
-                            face_name = str(
-                                self.storage.known_faces[face_id].get("name", "")
+                        if face_id is None and face_area > FACE_AREA_MIN_REGISTER:
+                            face_id, face_name = self.storage.register_face(
+                                face_img, emotion, age, self.known_faces_dir
                             )
+                            self.tracker.add_face_encoding(face_id, enc)
+                            self.storage.save_known_faces(
+                                self.storage.known_faces, faces_json
+                            )
+                        elif face_id and face_id in self.storage.known_faces:
+                            fd: Dict[str, Any] = self.storage.known_faces[face_id]
+                            now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            fd["last_seen"] = now_str
+                            fd["detection_count"] = int(fd.get("detection_count", 0)) + 1
+                            if emotion:
+                                emo_dict: Dict[str, int] = fd.setdefault("emotions", {})
+                                emo_dict[emotion] = emo_dict.get(emotion, 0) + 1
+                            if age is not None:
+                                ages_list: List[Any] = fd.setdefault("ages", [])
+                                ages_list.append(age)
+
+                    if emotion:
+                        self.emotion_stats[emotion] = self.emotion_stats.get(emotion, 0) + 1
+                        self.tracker.update_recent_emotion(emotion)
+
+                    if face_id and face_name is None and face_id in self.storage.known_faces:
+                        face_name = str(
+                            self.storage.known_faces[face_id].get("name", "")
+                        )
 
                     current_session_faces[face_position_key] = {
                         "face_id": face_id,
                         "face_name": face_name,
-                        "last_check": now,
                         "emotion": emotion,
                         "age": age,
                         "position": (x, y, w, h),
+                        "last_seen": now,
                     }
+                elif face_position_key in current_session_faces:
+                    # Update last_seen for existing entries (used by cleanup_trackers)
+                    current_session_faces[face_position_key]["last_seen"] = now
 
                 face_info = current_session_faces.get(face_position_key, {})
                 disp_face_id: Optional[str] = face_info.get("face_id")
                 disp_face_name: str = str(
                     face_info.get("face_name") or f"Face #{face_index + 1}"
                 )
-                disp_emotion: Optional[str] = (
-                    "N/A" if self.no_deepface else face_info.get("emotion")
-                )
+                if self.no_deepface:
+                    disp_emotion: Optional[str] = "N/A"
+                elif can_analyze and face_position_key not in current_session_faces:
+                    # No async result yet — show pending label
+                    disp_emotion = "analisando..."
+                else:
+                    disp_emotion = face_info.get("emotion")
                 disp_age: Optional[int] = face_info.get("age")
 
                 rect_color = (0, 255, 0) if disp_face_id else (255, 0, 0)
@@ -350,6 +375,7 @@ class FaceCounterApp:
             key = cv2.waitKey(1) & 0xFF
             if key == ord("q"):
                 logger.info("Usuário solicitou saída (tecla 'q')")
+                self.stop_analysis_thread()  # Stop thread before releasing camera
                 break
             if key == ord("s"):
                 frame_path = os.path.join(
@@ -366,6 +392,9 @@ class FaceCounterApp:
                 self.tracker.cleanup_trackers(current_session_faces)
                 last_cleanup = now
 
+        # Ensure thread is stopped on any exit path (error or normal)
+        if can_analyze:
+            self.stop_analysis_thread()
         cap.release()
         cv2.destroyAllWindows()
 
