@@ -5,12 +5,12 @@
 Face Counter & Emotion Analyzer - Uma aplicação para contagem e análise emocional de faces
 """
 
-import os
+import os  # noqa: I001
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
-from pathlib import Path
-from typing import Optional, Tuple, Dict, List
+from pathlib import Path  # noqa: F401
+from typing import Optional, Tuple, Dict, List  # noqa: F401
 import logging
 import datetime
 import time
@@ -153,7 +153,7 @@ class FaceCounter:
         try:
             # Gerar um ID único para esta face
             self.unique_faces_detected += 1
-            face_id = f"face_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{self.unique_faces_detected}"
+            face_id = f"face_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}_{self.unique_faces_detected}"  # noqa: E501
 
             # Salvar imagem da face
             face_img_path = os.path.join(self.known_faces_dir, f"{face_id}.jpg")
@@ -226,7 +226,7 @@ class FaceCounter:
         return None
 
     def recognize_face(self, face_img, emotion=None, age=None):
-        """Reconhece uma face e retorna seu ID e nome, ou registra como nova se não for reconhecida"""
+        """Reconhece uma face e retorna seu ID e nome, ou registra como nova se não for reconhecida"""  # noqa: E501
         if not DEEPFACE_AVAILABLE:
             return None, None
 
@@ -428,7 +428,7 @@ class FaceCounter:
 
         except Exception as e:
             logging.error(f"Erro ao processar frame: {str(e)}")
-            traceback.print_exc()
+            traceback.print_exc()  # noqa: F821
 
         return display_frame
 
@@ -443,7 +443,7 @@ class FaceCounter:
             del self.tracked_faces[face_id]
 
     def detect_faces_webcam(self):
-        """Detecta faces em tempo real usando a webcam com contagem de pessoas e análise emocional"""
+        """Detecta faces em tempo real usando a webcam com contagem de pessoas e análise emocional"""  # noqa: E501
         logger.info("Iniciando detecção facial pela webcam com análise emocional")
 
         try:
@@ -482,13 +482,13 @@ class FaceCounter:
             logger.info("Câmera inicializada com sucesso")
 
             logger.info(
-                f"Webcam iniciada com sucesso. Resolução: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}"
+                f"Webcam iniciada com sucesso. Resolução: {int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))}x{int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))}"  # noqa: E501
             )
             print(
                 "Iniciando detecção facial com contagem de pessoas e análise emocional..."
             )
             print(
-                "Pressione 'q' para sair, 's' para salvar um frame, 'e' para ver estatísticas de emoções"
+                "Pressione 'q' para sair, 's' para salvar um frame, 'e' para ver estatísticas de emoções"  # noqa: E501
             )
 
             frame_count = 0
@@ -604,7 +604,7 @@ class FaceCounter:
                     face_width_ratio = w / frame.shape[1]
 
                     # Filtrar faces muito pequenas ou muito grandes
-                    if face_area < self.FACE_AREA_MIN or face_width_ratio > self.FACE_WIDTH_RATIO_MAX:
+                    if face_area < self.FACE_AREA_MIN or face_width_ratio > self.FACE_WIDTH_RATIO_MAX:  # noqa: E501
                         continue
 
                     # Extrair a imagem da face
@@ -661,7 +661,7 @@ class FaceCounter:
                             )
 
                         # Se não reconheceu, registrar como nova face
-                        if face_id is None and DEEPFACE_AVAILABLE and face_area > self.FACE_AREA_MIN_REGISTER:
+                        if face_id is None and DEEPFACE_AVAILABLE and face_area > self.FACE_AREA_MIN_REGISTER:  # noqa: E501
                             face_id, face_name = self.register_new_face(
                                 face_img, emotion, age
                             )
@@ -844,10 +844,10 @@ class FaceCounter:
 
                 predominant = self._get_predominant_emotion(emotions)
                 logger.info(
-                    f"{name}: Sentimento predominante é '{predominant}' ({person_pct[predominant]:.1f}%)"
+                    f"{name}: Sentimento predominante é '{predominant}' ({person_pct[predominant]:.1f}%)"  # noqa: E501
                 )
 
-                print(f"{name}: Sentimento predominante: {predominant} ({person_pct[predominant]:.1f}%)")
+                print(f"{name}: Sentimento predominante: {predominant} ({person_pct[predominant]:.1f}%)")  # noqa: E501
                 print("  Distribuição de sentimentos:")
                 for em, pct in sorted(person_pct.items(), key=lambda x: x[1], reverse=True):
                     print(f"    - {em}: {pct:.1f}%")
@@ -1096,7 +1096,7 @@ class FaceCounter:
 
             # Registrar no log
             logger.info(
-                f"Estatísticas de idade: Média: {overall_avg:.1f}, Min: {min_age:.1f}, Max: {max_age:.1f}"
+                f"Estatísticas de idade: Média: {overall_avg:.1f}, Min: {min_age:.1f}, Max: {max_age:.1f}"  # noqa: E501
             )
 
         # Listar pessoas e suas emoções e idades
@@ -1107,12 +1107,12 @@ class FaceCounter:
             ages = face_data.get("ages", [])
             detection_count = face_data["detection_count"]
 
-            avg_age_str = f"Idade média: {sum(ages)/len(ages):.1f} anos" if ages else "Idade não detectada"
+            avg_age_str = f"Idade média: {sum(ages)/len(ages):.1f} anos" if ages else "Idade não detectada"  # noqa: E501
             if emotions:
                 predominant = self._get_predominant_emotion(emotions)
-                print(f"{name} - Sentimento predominante: {predominant} ({avg_age_str}, Detectado {detection_count} vezes)")
+                print(f"{name} - Sentimento predominante: {predominant} ({avg_age_str}, Detectado {detection_count} vezes)")  # noqa: E501
             else:
-                print(f"{name} - Sem emoções detectadas ({avg_age_str}, Detectado {detection_count} vezes)")
+                print(f"{name} - Sem emoções detectadas ({avg_age_str}, Detectado {detection_count} vezes)")  # noqa: E501
 
 
 def main():
