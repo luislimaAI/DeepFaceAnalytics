@@ -1,3 +1,21 @@
+## 2026-02-27 - US-004
+- Created deepface_analytics/tracker.py with FaceTracker class
+  - RECOGNITION_THRESHOLD=0.3, FACE_TRACKING_THRESHOLD=3.0, EMOTION_WINDOW_SIZE=30
+  - _encoding_matrix: npt.NDArray[Any] of shape (N, embedding_dim); _face_ids: List[str] (parallel arrays)
+  - is_same_as_known_face(encoding): vectorized np.linalg.norm(matrix - encoding, axis=1), returns face_id of closest if < threshold
+  - add_face_encoding(face_id, encoding): reshapes to (1,-1) and np.vstack; handles empty matrix case separately
+  - update_recent_emotion(emotion): appends to deque(maxlen=30), Counter.most_common(1)[0][0]
+  - cleanup_trackers(tracked_faces): removes face_ids where now - state['last_seen'] > FACE_TRACKING_THRESHOLD
+- Updated deepface_analytics/__init__.py to export FaceTracker
+- Files changed: deepface_analytics/tracker.py (new), deepface_analytics/__init__.py (updated)
+- **Learnings for future iterations:**
+  - np.empty((0,0)) as initial matrix sentinel; check `len(self._face_ids) == 0` before vstack
+  - Use `float(distances[min_idx]) < threshold` to coerce numpy scalar for mypy
+  - `Counter[str]` from collections is subscriptable in Python 3.9+ and mypy strict accepts it
+  - `Deque[str]` from typing works fine with mypy strict; `deque(maxlen=N)` for sliding window
+  - cleanup_trackers takes `Dict[str, Any]` and modifies in-place; collect inactive keys first then delete
+---
+
 ## Codebase Patterns
 - ruff uses `[tool.ruff.lint]` section (not top-level `select`) in pyproject.toml
 - deepface IS installed in this environment; `from deepface import DeepFace` works without `# type: ignore`
