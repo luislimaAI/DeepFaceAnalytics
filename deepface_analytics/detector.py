@@ -23,7 +23,7 @@ class FaceDetector:
     """Detects faces in frames using Haar Cascade classifier."""
 
     def __init__(self) -> None:
-        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+        cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"  # type: ignore[attr-defined]
         self._cascade = cv2.CascadeClassifier(cascade_path)
         logger.debug("FaceDetector initialized with Haar Cascade")
 
@@ -35,7 +35,7 @@ class FaceDetector:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.equalizeHist(gray)
 
-        raw: npt.NDArray[Any] = self._cascade.detectMultiScale(
+        raw: npt.NDArray[Any] = self._cascade.detectMultiScale(  # type: ignore[assignment]
             gray,
             scaleFactor=SCALE_FACTOR,
             minNeighbors=MIN_NEIGHBORS,

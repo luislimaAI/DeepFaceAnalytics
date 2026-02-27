@@ -55,10 +55,14 @@ def sample_known_faces() -> Dict[str, Any]:
 
 @pytest.fixture
 def mock_deepface(mocker: Any, mock_deepface_result: Dict[str, Any]) -> Any:
-    return mocker.patch(
-        "deepface.DeepFace.analyze",
-        return_value=[mock_deepface_result],
-    )
+    """Patch DeepFace at the analyzer module level (works whether deepface is installed or not)."""
+    from unittest.mock import MagicMock
+
+    mock_df = MagicMock()
+    mock_df.analyze.return_value = [mock_deepface_result]
+    mocker.patch("deepface_analytics.analyzer.DEEPFACE_AVAILABLE", True)
+    mocker.patch("deepface_analytics.analyzer._DeepFace", mock_df, create=True)
+    return mock_df
 
 
 @pytest.fixture
