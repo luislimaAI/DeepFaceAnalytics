@@ -58,3 +58,23 @@ def test_generate_session_json_contains_required_keys(
     result = storage.generate_session_json(sample_known_faces, stats, time.time())
     for key in ("timestamp", "date", "time", "session_info", "people"):
         assert key in result
+
+
+def test_register_face_creates_entry(
+    storage: FaceStorage, tmp_known_faces_dir: Any
+) -> None:
+    """register_face must save an image and add an entry to known_faces."""
+    import numpy as np
+
+    face_img = np.zeros((64, 64, 3), dtype=np.uint8)
+    face_id, name = storage.register_face(
+        face_img,
+        emotion="happy",
+        age=30,
+        known_faces_dir=str(tmp_known_faces_dir),
+    )
+    assert face_id in storage.known_faces
+    entry = storage.known_faces[face_id]
+    assert entry["name"] == name
+    assert "happy" in entry["emotions"]
+    assert 30 in entry["ages"]

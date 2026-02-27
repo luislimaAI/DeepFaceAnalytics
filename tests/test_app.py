@@ -2,6 +2,7 @@
 
 import queue
 import threading
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -79,3 +80,132 @@ def test_warmup_calls_deepface_with_blank_frame(app: FaceCounterApp) -> None:
     assert frame_arg is not None
     if hasattr(frame_arg, "shape"):
         assert frame_arg.shape == (224, 224, 3)
+
+
+@pytest.fixture
+def app_with_faces(app: FaceCounterApp) -> FaceCounterApp:
+    """App with sample known faces and emotion stats pre-populated."""
+    app.emotion_stats = {"happy": 10, "neutral": 5, "sad": 2}
+    app.storage.known_faces = {
+        "face_001": {
+            "name": "Person 1",
+            "emotions": {"happy": 8, "neutral": 2},
+            "ages": [25, 27, 26],
+            "detection_count": 10,
+        },
+        "face_002": {
+            "name": "Person 2",
+            "emotions": {},
+            "ages": [],
+            "detection_count": 3,
+        },
+    }
+    return app
+
+
+def test_detect_faces_webcam_exits_when_camera_not_opened(app: FaceCounterApp) -> None:
+    """detect_faces_webcam must return early when cap.isOpened() is False."""
+    mock_cap = MagicMock()
+    mock_cap.isOpened.return_value = False
+    with patch("deepface_analytics.app.cv2.VideoCapture", return_value=mock_cap):
+        app.detect_faces_webcam()  # Should return without raising
+
+
+def test_show_emotion_statistics_empty(app: FaceCounterApp, capsys: Any) -> None:
+    """show_emotion_statistics prints message when no emotions detected."""
+    app.emotion_stats = {}
+    app.show_emotion_statistics()
+    captured = capsys.readouterr()
+    assert "Nenhum sentimento" in captured.out
+
+
+def test_show_emotion_statistics_with_data(
+    app_with_faces: FaceCounterApp, capsys: Any
+) -> None:
+    """show_emotion_statistics prints stats when emotion data exists."""
+    with patch("deepface_analytics.app.plt") as mock_plt:
+        mock_plt.figure.return_value = MagicMock()
+        mock_plt.show.return_value = None
+        mock_plt.savefig.return_value = None
+        app_with_faces.show_emotion_statistics()
+    captured = capsys.readouterr()
+    assert "happy" in captured.out
+    assert "10" in captured.out
+
+
+def test_list_people_count_empty(app: FaceCounterApp, capsys: Any) -> None:
+    """list_people_count prints message when no people identified."""
+    app.storage.known_faces = {}
+    app.list_people_count()
+    captured = capsys.readouterr()
+    assert "Nenhuma pessoa" in captured.out
+
+
+def test_list_people_count_with_data(
+    app_with_faces: FaceCounterApp, capsys: Any
+) -> None:
+    """list_people_count displays people and emotion distribution."""
+    app_with_faces.list_people_count()
+    captured = capsys.readouterr()
+    assert "Total de pessoas" in captured.out
+
+
+def test_save_results_to_json(app_with_faces: FaceCounterApp, tmp_path: Any) -> None:
+    """save_results_to_json writes a valid JSON file and returns the path."""
+    import json
+
+    app_with_faces.output_dir = str(tmp_path)
+    result = app_with_faces.save_results_to_json()
+    assert result is not None
+    assert result.endswith(".json")
+    with open(result, encoding="utf-8") as fh:
+        data = json.load(fh)
+    assert "timestamp" in data
+    assert "people" in data
+
+
+def test_detect_faces_webcam_exits_when_no_frames(app: FaceCounterApp) -> None:
+    """detect_faces_webcam must return when first test frame read fails."""
+    mock_cap = MagicMock()
+    mock_cap.isOpened.return_value = True
+    # First 10 reads for warmup return False, then the test read returns (False, None)
+    mock_cap.read.return_value = (False, None)
+    with patch("deepface_analytics.app.cv2.VideoCapture", return_value=mock_cap):
+        app.detect_faces_webcam()  # Should return without raising
+
+
+def test_show_emotion_statistics_plt_exception(
+    app_with_faces: FaceCounterApp, capsys: Any
+) -> None:
+    """show_emotion_statistics must handle matplotlib exception gracefully."""
+    with patch("deepface_analytics.app.plt") as mock_plt:
+        mock_plt.figure.side_effect = RuntimeError("no display")
+        app_with_faces.show_emotion_statistics()
+    captured = capsys.readouterr()
+    assert "happy" in captured.out  # stats still printed before chart
+
+
+def test_main_exits_on_option_5(tmp_path: Any) -> None:
+    """main() must exit cleanly when user chooses option 5."""
+    from deepface_analytics.app import main
+
+    with (
+        patch("deepface_analytics.app.DEEPFACE_AVAILABLE", False),
+        patch("builtins.input", return_value="5"),
+        patch("deepface_analytics.app.logging.basicConfig"),
+    ):
+        main(no_deepface=True)  # Should exit without raising
+
+
+def test_main_handles_invalid_option_then_exit(tmp_path: Any) -> None:
+    """main() must handle invalid choice and then exit on option 5."""
+    from deepface_analytics.app import main
+
+    inputs = iter(["9", "5"])
+
+    with (
+        patch("deepface_analytics.app.DEEPFACE_AVAILABLE", False),
+        patch("builtins.input", side_effect=lambda _: next(inputs)),
+        patch("deepface_analytics.app.logging.basicConfig"),
+    ):
+        main(no_deepface=True)
