@@ -1,5 +1,7 @@
 ## Codebase Patterns
 - ruff uses `[tool.ruff.lint]` section (not top-level `select`) in pyproject.toml
+- deepface IS installed in this environment; `from deepface import DeepFace` works without `# type: ignore`
+- For optional imports in try/except: if the package IS installed, mypy will flag `# type: ignore[name-defined]` as unused — omit it when package is available
 - Legacy face_counter_emotions.py has `traceback.print_exc()` without traceback imported (F821 bug) - add `# noqa: F821` until fixed in US-007
 - mypy per-file overrides: use `[[tool.mypy.overrides]]` with `module = "filename"` and `ignore_errors = true` for legacy files
 - When ruff checks succeed, run `mypy <file>` separately to confirm typecheck
@@ -10,6 +12,20 @@
 
 # Ralph Progress Log
 Started: Fri Feb 27 20:01:51 -03 2026
+---
+
+## 2026-02-27 - US-003
+- Created deepface_analytics/analyzer.py with FaceAnalyzer class
+  - EMOTION_RECHECK_INTERVAL = 2.0s constant
+  - analyze_face(face_img, face_id): checks DEEPFACE_AVAILABLE, serves cache within TTL, downscales to 224x224 (INTER_AREA) if larger, calls DeepFace.analyze with actions=["emotion","age","embedding"], returns dict with dominant_emotion/emotion_scores/embedding/age keys
+  - invalidate_cache(face_id): removes entry from internal _cache dict
+  - Returns None when DEEPFACE_AVAILABLE is False
+- Updated deepface_analytics/__init__.py to export FaceAnalyzer
+- Files changed: deepface_analytics/analyzer.py (new), deepface_analytics/__init__.py (updated)
+- **Learnings for future iterations:**
+  - deepface IS installed; `# type: ignore[name-defined]` on _DeepFace.analyze() causes unused-ignore mypy error — omit it
+  - cv2.resize dsize arg is (width, height), shape is (height, width) — for non-square targets must swap
+  - _ANALYSIS_SIZE is (224,224) square so (h>224 or w>224) guard works for both axes
 ---
 
 ## 2026-02-27 - US-002
