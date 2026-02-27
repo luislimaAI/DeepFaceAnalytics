@@ -1,0 +1,19 @@
+{
+    "timestamp": "2026-02-27T20:54:38.946799",
+    "num_frames": 300,
+    "no_deepface": true,
+    "fps": {
+        "mean": 33.82,
+        "min": 3.17
+    },
+    "frame_latency_ms": {
+        "p50": 27.034,
+        "p95": 42.383
+    },
+    "deepface_calls_per_minute": 0.0,
+    "ram_mb": {
+        "before": 208.3,
+        "after": 78.19,
+        "delta": -130.11
+    }
+}
