@@ -182,11 +182,19 @@ class FaceCounterApp:
         last_cleanup = time.time()
         faces_json = os.path.join(self.known_faces_dir, "known_faces.json")
 
+        read_failures = 0
+        MAX_READ_FAILURES = 5
+
         while True:
             ret, frame = cap.read()
             if not ret:
-                logger.error("Erro: Falha ao capturar frame da webcam")
-                break
+                read_failures += 1
+                if read_failures >= MAX_READ_FAILURES:
+                    logger.error("Erro: Falha ao capturar frame da webcam")
+                    break
+                time.sleep(0.05)
+                continue
+            read_failures = 0
 
             total_frames += 1
             now = time.time()
