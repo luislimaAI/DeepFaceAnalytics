@@ -1,0 +1,268 @@
+{
+  "project": "DeepFaceAnalytics",
+  "branchName": "ralph/performance-and-tests",
+  "description": "Performance Optimization & Benchmark Test Suite - Pipeline assíncrono, modularização, cache TTL, vetorização NumPy, correção de bugs e suíte de testes com ≥70% de cobertura",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Setup de infraestrutura de qualidade (pyproject.toml, linting, typecheck)",
+      "description": "As a developer, I want project-wide linting and typecheck configured so that all code quality checks are verifiable from a single command.",
+      "acceptanceCriteria": [
+        "Create requirements-dev.txt with: pytest, pytest-mock, pytest-cov, pytest-benchmark, coverage-badge, psutil, ruff, mypy",
+        "Create pyproject.toml with [tool.ruff] (rules E,F,I), [tool.mypy] (strict, ignore missing stubs for tensorflow/deepface/cv2), [tool.pytest.ini_options] (testpaths=[\"tests\"])",
+        "ruff check . passes with no errors on existing code (add noqa comments where necessary for legacy code)",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Criar estrutura do pacote deepface_analytics/ com detector.py",
+      "description": "As a developer, I want the project split into a proper Python package so each module can be tested and optimized independently.",
+      "acceptanceCriteria": [
+        "Create deepface_analytics/__init__.py exporting main public symbols",
+        "Create deepface_analytics/detector.py with FaceDetector class containing: detect_faces(frame) -> list of bounding boxes using Haar Cascade, filter_faces() that removes faces smaller than MIN_FACE_SIZE, expand_bounding_box() with safe boundary clamping",
+        "detector.py constants: MIN_FACE_SIZE=(30,30), SCALE_FACTOR=1.2, MIN_NEIGHBORS=6",
+        "face_counter_emotions.py still runs (can import from deepface_analytics or be left as-is for now)",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-003",
+      "title": "Criar analyzer.py com cache TTL e fallback DEEPFACE_AVAILABLE",
+      "description": "As a developer, I want DeepFace calls isolated in an analyzer module with a TTL cache so the same face is not re-analyzed every frame.",
+      "acceptanceCriteria": [
+        "Create deepface_analytics/analyzer.py with FaceAnalyzer class",
+        "analyze_face(face_img, face_id) returns dict with keys: dominant_emotion, emotion_scores, embedding, age",
+        "Results cached per face_id with TTL = EMOTION_RECHECK_INTERVAL (default 2.0s); returns cached result within TTL without calling DeepFace",
+        "Cache invalidated via invalidate_cache(face_id) method",
+        "DEEPFACE_AVAILABLE flag checked at import time; analyze_face returns None when DeepFace unavailable",
+        "DeepFace.analyze() called with actions=[\"emotion\", \"age\", \"embedding\"] (includes age - bug fix)",
+        "Face crops resized to 224x224 using cv2.INTER_AREA before analyze() call (only downscales, no upscaling)",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-004",
+      "title": "Criar tracker.py com reconhecimento vetorizado e sliding window",
+      "description": "As a developer, I want face tracking and recognition isolated in a module, with NumPy-vectorized distance computation replacing the O(n) Python loop.",
+      "acceptanceCriteria": [
+        "Create deepface_analytics/tracker.py with FaceTracker class",
+        "Embeddings stored as np.ndarray matrix of shape (N, embedding_dim) plus list of face_ids (parallel arrays)",
+        "is_same_as_known_face(encoding) computes distances = np.linalg.norm(matrix - encoding, axis=1) in one operation, returns face_id of closest match if min(distances) < RECOGNITION_THRESHOLD else None",
+        "add_face_encoding(face_id, encoding) appends to matrix and face_ids list",
+        "update_recent_emotion(emotion) uses collections.deque(maxlen=EMOTION_WINDOW_SIZE) and Counter; returns most common emotion",
+        "cleanup_trackers(tracked_faces) removes entries inactive for more than FACE_TRACKING_THRESHOLD seconds",
+        "RECOGNITION_THRESHOLD=0.3, FACE_TRACKING_THRESHOLD=3.0, EMOTION_WINDOW_SIZE=30",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-005",
+      "title": "Criar storage.py com persistência e limite LRU de faces conhecidas",
+      "description": "As a developer, I want all persistence logic (known_faces.json, session JSON, image saving) in one place, with a pruning mechanism to prevent unbounded growth.",
+      "acceptanceCriteria": [
+        "Create deepface_analytics/storage.py with FaceStorage class",
+        "load_known_faces(path) returns dict from JSON or {} if file does not exist",
+        "save_known_faces(data, path) writes JSON with indent=4",
+        "register_face(face_img, emotion, age, known_faces_dir) saves image as JPEG and adds entry to known_faces dict; returns (face_id, name)",
+        "prune_known_faces(data, max_entries=500) removes oldest entries by first_seen when len(data) > max_entries; returns pruned dict",
+        "generate_session_json(known_faces, stats, start_time) returns dict matching the documented JSON output format with: timestamp, date, time, session_info, people array",
+        "All directory creation handled with os.makedirs(exist_ok=True)",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-006",
+      "title": "Criar app.py com pre-warming de modelos e entry-point atualizado",
+      "description": "As a developer, I want the main webcam loop and CLI menu in app.py, with models pre-warmed before the capture loop starts, and face_counter_emotions.py as a thin entry-point.",
+      "acceptanceCriteria": [
+        "Create deepface_analytics/app.py with FaceCounterApp class orchestrating FaceDetector, FaceAnalyzer, FaceTracker, FaceStorage",
+        "warmup_models() method calls DeepFace with a blank 224x224 frame before the main loop; prints 'Carregando modelos de análise... (pode levar alguns segundos)' and logs load time in INFO",
+        "detect_faces_webcam() implements the main capture + display loop using the new modules",
+        "CLI menu (options 1-5) preserved with identical user-facing output",
+        "Update face_counter_emotions.py to: from deepface_analytics.app import main; main()",
+        "python face_counter_emotions.py still launches the application with identical menu",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-007",
+      "title": "Corrigir bug graceful shutdown e flag --no-deepface",
+      "description": "As a developer, I want the application to accept a --no-deepface CLI flag and to use logger.exception() instead of missing traceback import.",
+      "acceptanceCriteria": [
+        "Replace all traceback.print_exc() calls with logger.exception() throughout the codebase (traceback was never imported - NameError in production)",
+        "Add --no-deepface flag parsed via argparse in face_counter_emotions.py; passed to FaceCounterApp constructor",
+        "When --no-deepface: FaceAnalyzer skips DeepFace, emotion displayed as 'N/A', face recognition disabled",
+        "--help shows: '--no-deepface  Run without DeepFace (detection only, no emotion analysis)'",
+        "python face_counter_emotions.py --no-deepface starts without loading TensorFlow models",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-008",
+      "title": "Implementar pipeline assíncrono producer-consumer (thread infrastructure)",
+      "description": "As a developer, I want the thread-safe data structures and synchronization primitives for the async pipeline in place before wiring up the worker thread.",
+      "acceptanceCriteria": [
+        "Add to deepface_analytics/app.py: self.analysis_queue = queue.Queue(maxsize=2), self.results_dict = {}, self.results_lock = threading.Lock(), self.stop_event = threading.Event()",
+        "Add _deepface_worker() method: loops until stop_event.is_set(), calls queue.get(timeout=1.0), on timeout checks stop_event and continues, on result calls FaceAnalyzer.analyze_face() and writes to results_dict under results_lock",
+        "Worker thread created as threading.Thread(target=self._deepface_worker, daemon=True)",
+        "stop_analysis_thread() method: sets stop_event, calls thread.join(timeout=3.0)",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-009",
+      "title": "Integrar pipeline assíncrono no loop principal da webcam",
+      "description": "As a user, I want the webcam display to run at full FPS without being blocked by DeepFace analysis.",
+      "acceptanceCriteria": [
+        "detect_faces_webcam() starts the worker thread before the capture loop",
+        "Main loop calls face_cascade.detectMultiScale() (fast) every frame for bounding boxes",
+        "For each detected face, attempts queue.put_nowait((face_id, face_crop)) — drops frame silently on queue.Full",
+        "Main loop reads results_dict under results_lock to get latest emotion/age per face_id for display",
+        "When no cached result exists for a face, display 'analisando...' on the bounding box label",
+        "On 'q' keypress: stop_analysis_thread() called before cap.release()",
+        "Display FPS does not drop below 15 FPS during normal operation (verified by observing FPS counter on screen)",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-010",
+      "title": "Criar tests/conftest.py com fixtures compartilhadas",
+      "description": "As a developer, I want shared pytest fixtures available to all test files so tests are consistent and do not duplicate setup code.",
+      "acceptanceCriteria": [
+        "Create tests/__init__.py (empty)",
+        "Create tests/conftest.py with fixtures: synthetic_frame (480x640x3 uint8 NumPy array), synthetic_face_crop (224x224x3 uint8 NumPy array), mock_deepface_result (dict with dominant_emotion='happy', emotion={'happy':95.0,'neutral':5.0}, embedding=[0.1]*2622, age=28), tmp_known_faces_dir (tmp_path-based directory), sample_known_faces (dict with 2 sample face entries), mock_deepface (mocker.patch for DeepFace.analyze returning [mock_deepface_result])",
+        "All fixtures are scope='function' (default) to ensure test isolation",
+        "pytest tests/ -v --collect-only shows fixtures are discoverable",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-011",
+      "title": "Testes unitários de detector.py e analyzer.py",
+      "description": "As a developer, I want unit tests for face detection and analysis logic that run without webcam or GPU.",
+      "acceptanceCriteria": [
+        "Create tests/test_detector.py with tests: test_faces_smaller_than_min_size_are_filtered (pass bounding boxes smaller than (30,30), verify they are excluded), test_bounding_box_expansion_stays_within_frame_bounds (box near edge, verify clamped to frame size), test_detect_faces_returns_empty_list_on_blank_frame",
+        "Create tests/test_analyzer.py with tests: test_cache_hit_does_not_call_deepface (call analyze_face twice within TTL, assert DeepFace.analyze called once), test_cache_miss_after_ttl_calls_deepface (mock time.time to advance past TTL, assert DeepFace.analyze called again), test_age_present_in_result (result dict has key 'age'), test_returns_none_when_deepface_unavailable (patch DEEPFACE_AVAILABLE=False)",
+        "All DeepFace calls mocked using mock_deepface fixture from conftest.py",
+        "pytest tests/test_detector.py tests/test_analyzer.py -v passes with no failures",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-012",
+      "title": "Testes unitários de tracker.py e storage.py",
+      "description": "As a developer, I want unit tests for face tracking/recognition and persistence logic.",
+      "acceptanceCriteria": [
+        "Create tests/test_tracker.py with tests: test_is_same_face_returns_face_id_when_distance_below_threshold, test_is_same_face_returns_none_when_distance_above_threshold, test_vectorized_recognition_matches_loop_behavior (same result for N=10 faces), test_sliding_window_returns_most_common_emotion (add 20 'happy' + 5 'sad', expect 'happy'), test_cleanup_removes_inactive_faces (last_seen > FACE_TRACKING_THRESHOLD)",
+        "Create tests/test_storage.py with tests: test_save_and_load_known_faces_roundtrip (save dict, load it back, assert equal), test_load_returns_empty_dict_when_file_missing, test_prune_keeps_max_entries (create 600 entries, prune to 500, assert len==500), test_prune_removes_oldest_by_first_seen, test_generate_session_json_contains_required_keys (timestamp, date, time, session_info, people)",
+        "All file I/O uses tmp_known_faces_dir fixture",
+        "pytest tests/test_tracker.py tests/test_storage.py -v passes with no failures",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-013",
+      "title": "Testes unitários de app.py (threading e shutdown)",
+      "description": "As a developer, I want tests that verify the async pipeline starts, processes results, and shuts down cleanly without deadlocks.",
+      "acceptanceCriteria": [
+        "Create tests/test_app.py with tests: test_stop_event_terminates_worker_thread (start worker thread, set stop_event, join with timeout=3s, assert thread is not alive), test_queue_full_does_not_block_main_thread (fill queue with maxsize items, put_nowait raises Full but does not block), test_results_dict_updated_by_worker (enqueue mock face crop, wait 0.5s, assert results_dict has entry), test_warmup_calls_deepface_with_blank_frame (assert DeepFace called during warmup)",
+        "cv2.VideoCapture mocked in all tests",
+        "All tests complete in < 5 seconds total",
+        "pytest tests/test_app.py -v passes with no failures",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-014",
+      "title": "Script de profiling baseline e relatório",
+      "description": "As a developer, I want a reproducible profiling script that measures current performance using synthetic frames and saves a baseline report.",
+      "acceptanceCriteria": [
+        "Create tasks/profile_run.py that: generates 300 synthetic frames (np.random.randint), runs them through FaceDetector.detect_faces() and (optionally, if not --no-deepface) FaceAnalyzer.analyze_face() with mocked DeepFace, measures: FPS (mean/min), frame latency (p50/p95 in ms), DeepFace calls per minute, RAM usage via psutil",
+        "Saves tasks/baseline_report.json with all metrics plus timestamp",
+        "cProfile captures top 10 functions by cumulative time; saves tasks/baseline_profile.prof",
+        "Script accepts --no-deepface flag to profile detection-only path",
+        "python tasks/profile_run.py runs without error and prints summary to stdout",
+        "Typecheck passes"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-015",
+      "title": "Suíte de benchmarks com pytest-benchmark",
+      "description": "As a developer, I want automated benchmarks for critical functions so performance regressions are detected automatically.",
+      "acceptanceCriteria": [
+        "Create tests/test_benchmarks.py with benchmarks using pytest-benchmark fixture: bench_detect_faces (FaceDetector.detect_faces with synthetic_frame), bench_recognition_n10 and bench_recognition_n100 (FaceTracker.is_same_as_known_face with 10 and 100 known faces), bench_storage_save and bench_storage_load (FaceStorage save/load with 50 entries), bench_analyzer_cache_hit and bench_analyzer_cache_miss (FaceAnalyzer with mocked DeepFace)",
+        "bench_recognition_n100 is at least 2x faster than a reference loop implementation (assert in test)",
+        "pytest tests/test_benchmarks.py --benchmark-save=baseline runs without error and saves .benchmarks/ folder",
+        "pytest tests/test_benchmarks.py --benchmark-compare=baseline passes if no regression >10%",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-016",
+      "title": "Verificar cobertura ≥70% e criar Makefile",
+      "description": "As a developer, I want a single Makefile to run all quality checks and a verified coverage report showing ≥70% coverage.",
+      "acceptanceCriteria": [
+        "Create Makefile with targets: install-dev (python -m venv venv && source venv/bin/activate && pip install -r requirements.txt -r requirements-dev.txt), lint (ruff check .), typecheck (mypy deepface_analytics/), test (pytest --cov=deepface_analytics --cov-report=html --cov-fail-under=70), benchmark (pytest tests/test_benchmarks.py --benchmark-save=baseline), benchmark-compare (pytest tests/test_benchmarks.py --benchmark-compare=baseline), profile (python tasks/profile_run.py), check (runs lint + typecheck + test sequentially)",
+        "make test passes with coverage ≥70% reported for deepface_analytics/",
+        "htmlcov/ directory created after make test",
+        "coverage-badge generates badge; update README.md coverage badge line",
+        "make check exits 0 (lint + typecheck + tests all pass)",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": ""
+    }
+  ]
+}

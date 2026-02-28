@@ -1,0 +1,36 @@
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+exclude = [
+    ".git",
+    "__pycache__",
+    "venv",
+    ".venv",
+]
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
+exclude = [
+    "venv",
+    ".venv",
+]
+
+[[tool.mypy.overrides]]
+module = [
+    "tensorflow.*",
+    "deepface.*",
+    "cv2.*",
+    "matplotlib.*",
+    "psutil.*",
+]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "face_counter_emotions"
+ignore_errors = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

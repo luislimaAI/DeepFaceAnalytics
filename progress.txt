@@ -1,0 +1,261 @@
+## 2026-02-27 - US-009
+- Rewrote `detect_faces_webcam()` to use async producer-consumer pipeline:
+  - `can_analyze` flag computed before `warmup_models()` and thread start
+  - `stop_event.clear()` + new `threading.Thread` created each call (allows multiple webcam sessions from menu)
+  - Thread started before capture loop (`self.analysis_thread.start()`)
+  - Main loop: fast `self.detector.detect_faces(frame)` every frame (no blocking)
+  - Per-face: `queue.put_nowait((face_position_key, face_img))` with silent `queue.Full` drop
+  - Per-face: reads `self.results_dict.get(face_position_key)` under `self.results_lock`
+  - Registration/tracking logic moved to "first result" handler (only runs once per position key)
+  - `current_session_faces` stores `"last_seen": now` (replaces old `"last_check"`) for `cleanup_trackers` compatibility
+  - 'analisando...' shown when `can_analyze and face_position_key not in current_session_faces`
+  - On 'q': `stop_analysis_thread()` called before break (before `cap.release()`)
+  - After loop: `stop_analysis_thread()` called again (idempotent — handles error exit path)
+  - Removed unused `EMOTION_RECHECK_INTERVAL` import (no longer needed in main loop)
+- ruff check . passes, mypy deepface_analytics/ passes
+- Files changed: deepface_analytics/app.py
+- **Learnings for future iterations:**
+  - Thread must be recreated each call to `detect_faces_webcam()` — Python threads can only be started once; use `stop_event.clear()` + `threading.Thread(...)` before `.start()`
+  - `queue.Full` exception from `put_nowait()` must be caught silently (not logged) to avoid spamming logs during normal operation
+  - `cleanup_trackers` requires `state["last_seen"]` float key — use `"last_seen"` not `"last_check"` in session_faces dict
+  - `stop_analysis_thread()` is idempotent: safe to call twice (once on 'q', once after loop exit)
+  - 'analisando...' condition: `can_analyze and face_position_key not in current_session_faces` — checked AFTER the result-processing block (which adds to current_session_faces when result arrives)
+---
+
+## 2026-02-27 - US-008
+- Added `import queue` and `import threading` to deepface_analytics/app.py
+- Added `Tuple` to typing imports
+- Added to `FaceCounterApp.__init__()`:
+  - `self.analysis_queue: queue.Queue[Tuple[str, npt.NDArray[Any]]] = queue.Queue(maxsize=2)`
+  - `self.results_dict: Dict[str, Any] = {}`
+  - `self.results_lock: threading.Lock = threading.Lock()`
+  - `self.stop_event: threading.Event = threading.Event()`
+  - `self.analysis_thread: threading.Thread = threading.Thread(target=self._deepface_worker, daemon=True)`
+- Added `_deepface_worker()` method: loops while not stop_event.is_set(); catches queue.Empty on timeout and continues; on result calls FaceAnalyzer.analyze_face() and writes to results_dict under results_lock; calls task_done() in finally
+- Added `stop_analysis_thread()` method: sets stop_event, joins thread if alive with timeout=3.0
+- Thread is created in __init__ but NOT started (US-009 starts it in detect_faces_webcam)
+- ruff check . passes, mypy deepface_analytics/ passes
+- Files changed: deepface_analytics/app.py
+- **Learnings for future iterations:**
+  - Thread is created in __init__ but started in detect_faces_webcam(); stop_analysis_thread() guards with is_alive() before join()
+  - `queue.Queue[Tuple[str, npt.NDArray[Any]]]` is the correct mypy-strict type for the analysis queue
+  - `queue.Empty` is the exception to catch on get(timeout=...) — import via `import queue` then `except queue.Empty`
+  - task_done() called in `finally` block so it's always called even if analyze_face() raises
+---
+
+## 2026-02-27 - US-007
+- Replaced `traceback.print_exc()` bug: legacy code already rewritten in US-006 using `logger.exception()` throughout — no traceback import needed
+- Added argparse to `face_counter_emotions.py` with `--no-deepface` flag; passes parsed value to `main(no_deepface=...)`
+- Modified `FaceCounterApp.__init__()` to accept `no_deepface: bool = False`; stored as `self.no_deepface`
+- Modified `warmup_models()`: skips DeepFace warmup when `self.no_deepface=True` (avoids loading TensorFlow)
+- Modified `detect_faces_webcam()`: `can_analyze = DEEPFACE_AVAILABLE and not self.no_deepface`; emotion displayed as 'N/A' (not None) when `--no-deepface`
+- Modified `main()` to accept `no_deepface: bool = False` and pass to `FaceCounterApp`
+- ruff check . passes, mypy deepface_analytics/ passes (6 source files)
+- Files changed: face_counter_emotions.py (argparse entry-point), deepface_analytics/app.py (no_deepface support)
+- **Learnings for future iterations:**
+  - `argparse.ArgumentParser` in face_counter_emotions.py is fine — mypy override `ignore_errors = true` covers that file
+  - `--no-deepface` flag uses `action="store_true"` → `args.no_deepface` is `bool`; argparse converts `--no-deepface` to `no_deepface` attribute automatically
+  - `can_analyze = DEEPFACE_AVAILABLE and not self.no_deepface` is the single gate for all analysis paths
+  - Display 'N/A' string for emotion (not None) when no-deepface, so the `if disp_emotion:` check shows it on screen
+---
+
+## 2026-02-27 - US-006
+- Created deepface_analytics/app.py with FaceCounterApp class
+  - warmup_models(): calls DeepFace.analyze() with blank 224x224 frame; prints warmup message; logs elapsed time
+  - detect_faces_webcam(): full capture loop using FaceDetector.detect_faces(), FaceAnalyzer.analyze_face(), FaceTracker.is_same_as_known_face()/add_face_encoding(), FaceStorage.register_face()/save_known_faces()
+  - show_emotion_statistics(): identical user-facing output to legacy (emotion stats + matplotlib chart)
+  - list_people_count(): identical user-facing output to legacy
+  - save_results_to_json(): uses FaceStorage.generate_session_json() + writes JSON to output/
+  - main(): logging setup, FaceCounterApp instantiation, CLI menu (options 1-5) preserved exactly
+- Updated deepface_analytics/__init__.py to export FaceCounterApp and main
+- Updated face_counter_emotions.py to thin entry-point: `from deepface_analytics.app import main; main()`
+- ruff check . passes, mypy deepface_analytics/ passes (6 source files)
+- Files changed: deepface_analytics/app.py (new), deepface_analytics/__init__.py (updated), face_counter_emotions.py (replaced with thin entry-point)
+- **Learnings for future iterations:**
+  - `set[str]` requires type param in mypy strict (bare `set` causes type-arg error)
+  - Import EMOTION_RECHECK_INTERVAL from analyzer module instead of accessing private `_ttl` attribute
+  - Face position key `f"{x}_{y}_{w}_{h}"` is used as DeepFace cache key (matches legacy behavior)
+  - `face_counter_emotions.py` mypy override remains in pyproject.toml (harmless after thin entry-point)
+  - FaceStorage.setdefault() pattern: `fd.setdefault("emotions", {})` returns `Any` under Dict[str,Any] - annotate explicitly
+---
+
+## 2026-02-27 - US-005
+- Created deepface_analytics/storage.py with FaceStorage class
+  - load_known_faces(path): returns dict from JSON or {} on missing file / parse error
+  - save_known_faces(data, path): writes JSON with indent=4; creates parent dir with os.makedirs(exist_ok=True)
+  - register_face(face_img, emotion, age, known_faces_dir): generates face_id = face_{timestamp}_{counter}, saves JPEG, adds entry to self.known_faces, returns (face_id, name)
+  - prune_known_faces(data, max_entries=500): sorts by first_seen ascending, keeps newest max_entries, returns new dict
+  - generate_session_json(known_faces, stats, start_time): returns dict with timestamp/date/time/session_info/people matching legacy format
+  - All directory creation via os.makedirs(exist_ok=True)
+- Updated deepface_analytics/__init__.py to export FaceStorage
+- Files changed: deepface_analytics/storage.py (new), deepface_analytics/__init__.py (updated)
+- **Learnings for future iterations:**
+  - import time inside generate_session_json to avoid top-level circular concern; or just import at top — both work with mypy
+  - prune_known_faces returns a NEW dict (not in-place) to match functional style; caller replaces their reference
+  - generate_session_json takes `stats: Dict[str, Any]` with at least `total_detected_faces` key; start_time is a float Unix timestamp
+  - save_known_faces uses os.path.dirname(os.path.abspath(path)) to ensure parent dir exists before writing
+---
+
+## 2026-02-27 - US-004
+- Created deepface_analytics/tracker.py with FaceTracker class
+  - RECOGNITION_THRESHOLD=0.3, FACE_TRACKING_THRESHOLD=3.0, EMOTION_WINDOW_SIZE=30
+  - _encoding_matrix: npt.NDArray[Any] of shape (N, embedding_dim); _face_ids: List[str] (parallel arrays)
+  - is_same_as_known_face(encoding): vectorized np.linalg.norm(matrix - encoding, axis=1), returns face_id of closest if < threshold
+  - add_face_encoding(face_id, encoding): reshapes to (1,-1) and np.vstack; handles empty matrix case separately
+  - update_recent_emotion(emotion): appends to deque(maxlen=30), Counter.most_common(1)[0][0]
+  - cleanup_trackers(tracked_faces): removes face_ids where now - state['last_seen'] > FACE_TRACKING_THRESHOLD
+- Updated deepface_analytics/__init__.py to export FaceTracker
+- Files changed: deepface_analytics/tracker.py (new), deepface_analytics/__init__.py (updated)
+- **Learnings for future iterations:**
+  - np.empty((0,0)) as initial matrix sentinel; check `len(self._face_ids) == 0` before vstack
+  - Use `float(distances[min_idx]) < threshold` to coerce numpy scalar for mypy
+  - `Counter[str]` from collections is subscriptable in Python 3.9+ and mypy strict accepts it
+  - `Deque[str]` from typing works fine with mypy strict; `deque(maxlen=N)` for sliding window
+  - cleanup_trackers takes `Dict[str, Any]` and modifies in-place; collect inactive keys first then delete
+---
+
+## Codebase Patterns
+- ruff uses `[tool.ruff.lint]` section (not top-level `select`) in pyproject.toml
+- deepface IS installed in this environment; `from deepface import DeepFace` works without `# type: ignore`
+- For optional imports in try/except: if the package IS installed, mypy will flag `# type: ignore[name-defined]` as unused — omit it when package is available
+- Legacy `traceback.print_exc()` bug: replaced with `logger.exception()` — never import traceback; logger.exception() logs the full traceback automatically
+- mypy per-file overrides: use `[[tool.mypy.overrides]]` with `module = "filename"` and `ignore_errors = true` for legacy files
+- When ruff checks succeed, run `mypy <file>` separately to confirm typecheck
+- face_counter_emotions.py is now a thin entry-point with argparse; real logic in deepface_analytics/ package
+- mypy strict mode: use `npt.NDArray[Any]` (from `numpy.typing`) for numpy arrays instead of bare `np.ndarray` to satisfy `type-arg` checks
+- cv2.data.haarcascades does NOT need `# type: ignore` with mypy 1.19 + cv2 stubs
+- Don't import `numpy as np` if only `numpy.typing as npt` is needed - avoids F401
+- CLI flags: use argparse in face_counter_emotions.py; pass parsed values to main() and then to FaceCounterApp constructor as constructor params
+
+# Ralph Progress Log
+Started: Fri Feb 27 20:01:51 -03 2026
+---
+
+## 2026-02-27 - US-003
+- Created deepface_analytics/analyzer.py with FaceAnalyzer class
+  - EMOTION_RECHECK_INTERVAL = 2.0s constant
+  - analyze_face(face_img, face_id): checks DEEPFACE_AVAILABLE, serves cache within TTL, downscales to 224x224 (INTER_AREA) if larger, calls DeepFace.analyze with actions=["emotion","age","embedding"], returns dict with dominant_emotion/emotion_scores/embedding/age keys
+  - invalidate_cache(face_id): removes entry from internal _cache dict
+  - Returns None when DEEPFACE_AVAILABLE is False
+- Updated deepface_analytics/__init__.py to export FaceAnalyzer
+- Files changed: deepface_analytics/analyzer.py (new), deepface_analytics/__init__.py (updated)
+- **Learnings for future iterations:**
+  - deepface IS installed; `# type: ignore[name-defined]` on _DeepFace.analyze() causes unused-ignore mypy error — omit it
+  - cv2.resize dsize arg is (width, height), shape is (height, width) — for non-square targets must swap
+  - _ANALYSIS_SIZE is (224,224) square so (h>224 or w>224) guard works for both axes
+---
+
+## 2026-02-27 - US-002
+- Created deepface_analytics/__init__.py exporting FaceDetector
+- Created deepface_analytics/detector.py with FaceDetector class
+  - detect_faces(frame): gray conversion, equalization, detectMultiScale, filter_faces
+  - filter_faces(faces): removes boxes smaller than MIN_FACE_SIZE
+  - expand_bounding_box(x, y, w, h, frame_shape): expands by 10%, clamps to frame boundaries
+  - Constants: MIN_FACE_SIZE=(30,30), SCALE_FACTOR=1.2, MIN_NEIGHBORS=6
+- face_counter_emotions.py remains untouched (still runs)
+- Files changed: deepface_analytics/__init__.py (new), deepface_analytics/detector.py (new)
+- **Learnings for future iterations:**
+  - Use `npt.NDArray[Any]` for numpy array type hints in strict mypy
+  - cv2.data.haarcascades is accessible without type: ignore in mypy 1.19
+  - Only import `numpy.typing as npt` if not using numpy directly to avoid F401
+---
+
+## 2026-02-27 - US-001
+- Implemented quality infrastructure setup
+- Files changed: requirements-dev.txt (new), pyproject.toml (new), face_counter_emotions.py (noqa comments)
+- Created requirements-dev.txt with dev dependencies
+- Created pyproject.toml with [tool.ruff.lint], [tool.mypy] (strict + ignore missing imports), [tool.pytest.ini_options]
+- Added noqa comments for I001, F401, F821, E501 in legacy file
+- Added mypy per-file override to ignore strict errors in legacy file
+- **Learnings for future iterations:**
+  - ruff's `select` must go under `[tool.ruff.lint]`, not top-level `[tool.ruff]`
+  - The legacy file has ~50 mypy strict errors - excluded via per-file override, not fixing legacy code
+  - `traceback.print_exc()` at line 431 is a real NameError bug (no import) - tagged `# noqa: F821` for now
+  - mypy strict mode requires full type annotations which legacy code lacks
+---
+
+## 2026-02-27 - US-010
+- Created tests/__init__.py (empty)
+- Created tests/conftest.py with 6 fixtures: synthetic_frame, synthetic_face_crop, mock_deepface_result, tmp_known_faces_dir, sample_known_faces, mock_deepface
+- All fixtures use default scope='function' for test isolation
+- pytest --collect-only --fixtures confirms all fixtures discoverable
+- ruff check . passes, mypy deepface_analytics/ passes
+- Files changed: tests/__init__.py (new), tests/conftest.py (new)
+- **Learnings for future iterations:**
+  - mock_deepface patches `deepface.DeepFace.analyze` (full module path), not `deepface_analytics.analyzer.DeepFace.analyze`
+  - embedding_list fixture added as utility (2622 floats of 0.1) for tracker tests
+  - conftest.py uses `from __future__ import annotations` for cleaner type hints
+---
+
+## 2026-02-27 - US-016
+- Created Makefile with targets: install-dev, lint, typecheck, test, benchmark, benchmark-compare, profile, check
+- Coverage: 72.70% (exceeds 70% requirement); htmlcov/ generated
+- Added additional tests to test_app.py: detect_faces_webcam early exit paths, show_emotion_statistics (empty/with data/plt exception), list_people_count, save_results_to_json, main() (option 5 exit, invalid option)
+- Added test_register_face_creates_entry to test_storage.py
+- make check exits 0: lint + typecheck + test all pass
+- Files changed: Makefile (new), tests/test_app.py (extended), tests/test_storage.py (extended)
+- **Learnings for future iterations:**
+  - `make check` = ruff check . + mypy deepface_analytics/ + pytest --cov-fail-under=70
+  - htmlcov/ is in .gitignore - don't try to commit it
+  - To test main() CLI loop: mock `builtins.input` with iter() side_effect + mock `logging.basicConfig`
+  - For plt-dependent tests: `patch("deepface_analytics.app.plt")` mocks the whole matplotlib module
+---
+
+## 2026-02-27 - US-015
+- Created tests/test_benchmarks.py with 8 benchmark tests:
+  - bench_detect_faces, bench_recognition_n10, bench_recognition_n100, bench_recognition_n100_faster_than_loop
+  - bench_storage_save, bench_storage_load, bench_analyzer_cache_miss, bench_analyzer_cache_hit
+- pytest --benchmark-save=baseline saves .benchmarks/ folder
+- All 8 benchmarks pass; --benchmark-compare=baseline passes
+- Files changed: tests/test_benchmarks.py (new), .benchmarks/ (new)
+- **Learnings for future iterations:**
+  - Use `patch("deepface_analytics.analyzer._DeepFace", mock_df, create=True)` for analyzer benchmarks (deepface not installed)
+  - FaceAnalyzer(ttl=0.0) forces cache miss on every call; FaceAnalyzer(ttl=60.0) ensures cache hit
+---
+
+## 2026-02-27 - US-014
+- Created tasks/profile_run.py with 300 synthetic frames, FaceDetector + FaceAnalyzer (mocked DeepFace)
+- Measures FPS (mean/min), latency (p50/p95), DeepFace calls/min, RAM usage via psutil
+- Saves tasks/baseline_report.json and tasks/baseline_profile.prof
+- Accepts --no-deepface flag for detection-only profiling
+- Files changed: tasks/profile_run.py (new), tasks/baseline_report.json (new), tasks/baseline_profile.prof (new)
+- **Learnings for future iterations:**
+  - sys.path manipulation needed in tasks/profile_run.py since tasks/ is not a Python package
+  - Use `create=True` in patch() for `_DeepFace` attribute that only exists when deepface is installed
+---
+
+## 2026-02-27 - US-013
+- Created tests/test_app.py with 4 tests: stop_event_terminates_worker, queue_full_no_block, results_dict_updated_by_worker, warmup_calls_deepface
+- FaceCounterApp created with no_deepface=True + patched DEEPFACE_AVAILABLE=False
+- Files changed: tests/test_app.py (new)
+---
+
+## 2026-02-27 - US-012
+- Created tests/test_tracker.py with 5 tests: is_same_face (below/above threshold), vectorized_matches_loop, sliding_window_most_common, cleanup_inactive
+- Created tests/test_storage.py with 5 tests: save_load_roundtrip, load_missing_file, prune_max_entries, prune_removes_oldest, generate_session_json_keys
+- Files changed: tests/test_tracker.py (new), tests/test_storage.py (new)
+---
+
+## 2026-02-27 - US-011
+- Created tests/test_detector.py: 4 tests for filter_faces, expand_bounding_box, detect_faces blank frame
+- Created tests/test_analyzer.py: 4 tests for cache hit/miss, age key, no-deepface path
+- Updated tests/conftest.py: mock_deepface patches deepface_analytics.analyzer._DeepFace (not deepface.DeepFace) + sets DEEPFACE_AVAILABLE=True — works without deepface installed
+- Fixed deepface_analytics/detector.py: added type: ignore[attr-defined] and type: ignore[assignment] for cv2 stubs from opencv-python-headless
+- Files changed: tests/test_detector.py (new), tests/test_analyzer.py (new), tests/conftest.py (updated), deepface_analytics/detector.py (type ignores)
+- **Learnings for future iterations:**
+  - When deepface is NOT installed: patch `deepface_analytics.analyzer._DeepFace` with create=True AND patch DEEPFACE_AVAILABLE=True
+  - mock_deepface fixture returns MagicMock with .analyze method; check mock_deepface.analyze.call_count (not mock_deepface.call_count)
+  - opencv-python-headless stubs differ from opencv-python: cv2.data.haarcascades and detectMultiScale return type need type: ignore
+---
+
+## 2026-02-27 - US-010
+- Created tests/__init__.py (empty)
+- Created tests/conftest.py with fixtures: synthetic_frame, synthetic_face_crop, mock_deepface_result, tmp_known_faces_dir, sample_known_faces, mock_deepface
+- Files changed: tests/__init__.py (new), tests/conftest.py (new)
+---
+
+## Codebase Patterns (updated)
+- When deepface is NOT installed: patch `deepface_analytics.analyzer._DeepFace` + `DEEPFACE_AVAILABLE` with `create=True`
+- `make check` = ruff check . + mypy deepface_analytics/ + pytest --cov-fail-under=70
+- opencv-python-headless stubs need `# type: ignore[attr-defined]` for cv2.data.haarcascades
+- For app.py tests: mock `builtins.input` + `logging.basicConfig` for main() testing

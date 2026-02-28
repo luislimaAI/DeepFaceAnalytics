@@ -1,0 +1,8 @@
+pytest
+pytest-mock
+pytest-cov
+pytest-benchmark
+coverage-badge
+psutil
+ruff
+mypy
