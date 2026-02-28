@@ -186,3 +186,76 @@ Started: Fri Feb 27 20:01:51 -03 2026
   - embedding_list fixture added as utility (2622 floats of 0.1) for tracker tests
   - conftest.py uses `from __future__ import annotations` for cleaner type hints
 ---
+
+## 2026-02-27 - US-016
+- Created Makefile with targets: install-dev, lint, typecheck, test, benchmark, benchmark-compare, profile, check
+- Coverage: 72.70% (exceeds 70% requirement); htmlcov/ generated
+- Added additional tests to test_app.py: detect_faces_webcam early exit paths, show_emotion_statistics (empty/with data/plt exception), list_people_count, save_results_to_json, main() (option 5 exit, invalid option)
+- Added test_register_face_creates_entry to test_storage.py
+- make check exits 0: lint + typecheck + test all pass
+- Files changed: Makefile (new), tests/test_app.py (extended), tests/test_storage.py (extended)
+- **Learnings for future iterations:**
+  - `make check` = ruff check . + mypy deepface_analytics/ + pytest --cov-fail-under=70
+  - htmlcov/ is in .gitignore - don't try to commit it
+  - To test main() CLI loop: mock `builtins.input` with iter() side_effect + mock `logging.basicConfig`
+  - For plt-dependent tests: `patch("deepface_analytics.app.plt")` mocks the whole matplotlib module
+---
+
+## 2026-02-27 - US-015
+- Created tests/test_benchmarks.py with 8 benchmark tests:
+  - bench_detect_faces, bench_recognition_n10, bench_recognition_n100, bench_recognition_n100_faster_than_loop
+  - bench_storage_save, bench_storage_load, bench_analyzer_cache_miss, bench_analyzer_cache_hit
+- pytest --benchmark-save=baseline saves .benchmarks/ folder
+- All 8 benchmarks pass; --benchmark-compare=baseline passes
+- Files changed: tests/test_benchmarks.py (new), .benchmarks/ (new)
+- **Learnings for future iterations:**
+  - Use `patch("deepface_analytics.analyzer._DeepFace", mock_df, create=True)` for analyzer benchmarks (deepface not installed)
+  - FaceAnalyzer(ttl=0.0) forces cache miss on every call; FaceAnalyzer(ttl=60.0) ensures cache hit
+---
+
+## 2026-02-27 - US-014
+- Created tasks/profile_run.py with 300 synthetic frames, FaceDetector + FaceAnalyzer (mocked DeepFace)
+- Measures FPS (mean/min), latency (p50/p95), DeepFace calls/min, RAM usage via psutil
+- Saves tasks/baseline_report.json and tasks/baseline_profile.prof
+- Accepts --no-deepface flag for detection-only profiling
+- Files changed: tasks/profile_run.py (new), tasks/baseline_report.json (new), tasks/baseline_profile.prof (new)
+- **Learnings for future iterations:**
+  - sys.path manipulation needed in tasks/profile_run.py since tasks/ is not a Python package
+  - Use `create=True` in patch() for `_DeepFace` attribute that only exists when deepface is installed
+---
+
+## 2026-02-27 - US-013
+- Created tests/test_app.py with 4 tests: stop_event_terminates_worker, queue_full_no_block, results_dict_updated_by_worker, warmup_calls_deepface
+- FaceCounterApp created with no_deepface=True + patched DEEPFACE_AVAILABLE=False
+- Files changed: tests/test_app.py (new)
+---
+
+## 2026-02-27 - US-012
+- Created tests/test_tracker.py with 5 tests: is_same_face (below/above threshold), vectorized_matches_loop, sliding_window_most_common, cleanup_inactive
+- Created tests/test_storage.py with 5 tests: save_load_roundtrip, load_missing_file, prune_max_entries, prune_removes_oldest, generate_session_json_keys
+- Files changed: tests/test_tracker.py (new), tests/test_storage.py (new)
+---
+
+## 2026-02-27 - US-011
+- Created tests/test_detector.py: 4 tests for filter_faces, expand_bounding_box, detect_faces blank frame
+- Created tests/test_analyzer.py: 4 tests for cache hit/miss, age key, no-deepface path
+- Updated tests/conftest.py: mock_deepface patches deepface_analytics.analyzer._DeepFace (not deepface.DeepFace) + sets DEEPFACE_AVAILABLE=True — works without deepface installed
+- Fixed deepface_analytics/detector.py: added type: ignore[attr-defined] and type: ignore[assignment] for cv2 stubs from opencv-python-headless
+- Files changed: tests/test_detector.py (new), tests/test_analyzer.py (new), tests/conftest.py (updated), deepface_analytics/detector.py (type ignores)
+- **Learnings for future iterations:**
+  - When deepface is NOT installed: patch `deepface_analytics.analyzer._DeepFace` with create=True AND patch DEEPFACE_AVAILABLE=True
+  - mock_deepface fixture returns MagicMock with .analyze method; check mock_deepface.analyze.call_count (not mock_deepface.call_count)
+  - opencv-python-headless stubs differ from opencv-python: cv2.data.haarcascades and detectMultiScale return type need type: ignore
+---
+
+## 2026-02-27 - US-010
+- Created tests/__init__.py (empty)
+- Created tests/conftest.py with fixtures: synthetic_frame, synthetic_face_crop, mock_deepface_result, tmp_known_faces_dir, sample_known_faces, mock_deepface
+- Files changed: tests/__init__.py (new), tests/conftest.py (new)
+---
+
+## Codebase Patterns (updated)
+- When deepface is NOT installed: patch `deepface_analytics.analyzer._DeepFace` + `DEEPFACE_AVAILABLE` with `create=True`
+- `make check` = ruff check . + mypy deepface_analytics/ + pytest --cov-fail-under=70
+- opencv-python-headless stubs need `# type: ignore[attr-defined]` for cv2.data.haarcascades
+- For app.py tests: mock `builtins.input` + `logging.basicConfig` for main() testing
