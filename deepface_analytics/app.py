@@ -91,7 +91,7 @@ class FaceCounterApp:
                 enforce_detection=False,
                 silent=True,
             )
-            _DeepFace.represent(blank, enforce_detection=False)
+            _DeepFace.represent(blank, enforce_detection=False)  # warm-up representation model
         except Exception:
             logger.exception("Warmup failed (non-fatal)")
         elapsed = time.time() - t0
