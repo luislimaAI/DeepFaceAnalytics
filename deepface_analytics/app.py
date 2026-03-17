@@ -87,10 +87,11 @@ class FaceCounterApp:
             blank: npt.NDArray[Any] = np.zeros((224, 224, 3), dtype=np.uint8)
             _DeepFace.analyze(
                 blank,
-                actions=["emotion", "age", "embedding"],
+                actions=["emotion", "age"],
                 enforce_detection=False,
                 silent=True,
             )
+            _DeepFace.represent(blank, enforce_detection=False)
         except Exception:
             logger.exception("Warmup failed (non-fatal)")
         elapsed = time.time() - t0

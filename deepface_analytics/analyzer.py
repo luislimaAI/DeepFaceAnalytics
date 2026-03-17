@@ -2,7 +2,7 @@
 
 import logging
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy.typing as npt
@@ -65,15 +65,30 @@ class FaceAnalyzer:
         try:
             raw = _DeepFace.analyze(
                 face_img,
-                actions=["emotion", "age", "embedding"],
+                actions=["emotion", "age"],
                 enforce_detection=False,
                 silent=True,
             )
             data: Dict[str, Any] = raw[0] if isinstance(raw, list) else raw
+            embedding: List[float] = []
+            try:
+                represent_raw = _DeepFace.represent(
+                    face_img,
+                    enforce_detection=False,
+                )
+                rep = represent_raw[0] if isinstance(represent_raw, list) else represent_raw
+                if isinstance(rep, dict):
+                    embedding = rep.get("embedding", [])
+            except Exception:
+                logger.debug(
+                    "DeepFace.represent failed for face_id=%s, embedding omitted",
+                    face_id,
+                    exc_info=True,
+                )
             result = {
                 "dominant_emotion": data.get("dominant_emotion", "unknown"),
                 "emotion_scores": data.get("emotion", {}),
-                "embedding": data.get("embedding", []),
+                "embedding": embedding,
                 "age": data.get("age", 0),
             }
         except Exception:
