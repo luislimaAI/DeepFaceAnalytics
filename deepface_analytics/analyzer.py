@@ -86,6 +86,7 @@ class FaceAnalyzer:
                 logger.debug(
                     "DeepFace.represent failed for face_id=%s; embedding will be empty",
                     face_id,
+                    exc_info=True,
                 )
 
             result = {
