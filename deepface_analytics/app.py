@@ -87,7 +87,7 @@ class FaceCounterApp:
             blank: npt.NDArray[Any] = np.zeros((224, 224, 3), dtype=np.uint8)
             _DeepFace.analyze(
                 blank,
-                actions=["emotion", "age", "embedding"],
+                actions=["emotion", "age"],  # "embedding" is not a valid analyze action
                 enforce_detection=False,
                 silent=True,
             )

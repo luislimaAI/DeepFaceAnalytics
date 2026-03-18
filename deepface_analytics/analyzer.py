@@ -65,15 +65,33 @@ class FaceAnalyzer:
         try:
             raw = _DeepFace.analyze(
                 face_img,
-                actions=["emotion", "age", "embedding"],
+                actions=["emotion", "age"],
                 enforce_detection=False,
                 silent=True,
             )
             data: Dict[str, Any] = raw[0] if isinstance(raw, list) else raw
+
+            # Fetch embedding via represent() — "embedding" is not a valid
+            # DeepFace.analyze action and must be obtained separately.
+            embedding: list = []
+            try:
+                repr_raw = _DeepFace.represent(
+                    face_img,
+                    enforce_detection=False,
+                    silent=True,
+                )
+                if isinstance(repr_raw, list) and repr_raw:
+                    embedding = repr_raw[0].get("embedding", [])
+            except Exception:
+                logger.debug(
+                    "DeepFace.represent failed for face_id=%s; embedding will be empty",
+                    face_id,
+                )
+
             result = {
                 "dominant_emotion": data.get("dominant_emotion", "unknown"),
                 "emotion_scores": data.get("emotion", {}),
-                "embedding": data.get("embedding", []),
+                "embedding": embedding,
                 "age": data.get("age", 0),
             }
         except Exception:
