@@ -83,7 +83,7 @@ class FaceAnalyzer:
                 if isinstance(repr_raw, list) and repr_raw:
                     embedding = repr_raw[0].get("embedding", [])
             except Exception:
-                logger.debug(
+                logger.warning(
                     "DeepFace.represent failed for face_id=%s; embedding will be empty",
                     face_id,
                     exc_info=True,
